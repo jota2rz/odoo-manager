@@ -1,13 +1,13 @@
 # 🐳 Odoo Manager
 
-A modern web application for managing Odoo and PostgreSQL Docker containers locally. Built with Go, Templ, HTMX, and Alpine.js, featuring a sleek dark theme and a real-time UI powered by Server-Sent Events (SSE).
+A modern web application for managing Odoo and PostgreSQL Docker containers locally. Built with Go and Templ, featuring a sleek dark theme and a real-time UI powered by Server-Sent Events (SSE).
 
 ## Features
 
 - 🚀 **Easy Project Management** - Create, start, stop, and delete Odoo projects with a few clicks
 - 🐳 **Docker Integration** - Automatic management of Odoo and PostgreSQL containers
-- � **Real-time UI** - Live project status, spinner sync, and log streaming across all browsers via Server-Sent Events (SSE)
-- 🎨 **Dark Theme UI** - Modern, responsive interface built with HTMX and Alpine.js
+- 📡 **Real-time UI** - Live project status, spinner sync, and log streaming across all browsers via Server-Sent Events (SSE)
+- 🎨 **Dark Theme UI** - Modern, responsive interface built with Tailwind CSS
 - 📦 **Embedded Frontend** - All assets embedded in a single binary using Templ
 - 🗄️ **SQLite Storage** - ACID-compliant project persistence with automatic schema migrations
 - 🏷️ **Docker Labels** - Containers are labeled for reliable discovery and management
@@ -17,8 +17,11 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 
 ## Prerequisites
 
-- **Go** 1.24 or higher
 - **Docker** (with Docker daemon running)
+
+To build from source you also need:
+
+- **Go** 1.24 or higher
 - **Git** (for cloning the repository)
 
 ## Installation
@@ -283,8 +286,6 @@ make build      # Rebuild
 
 ### Frontend
 
-- **HTMX**: Dynamic HTML over the wire
-- **Alpine.js**: Lightweight JavaScript reactivity
 - **Tailwind CSS v4**: Utility-first CSS via standalone CLI (no Node.js required)
 - **SSE**: Real-time UI updates and log streaming across all connected browsers
 
@@ -334,8 +335,6 @@ For issues, questions, or contributions, please visit the [GitHub repository](ht
 - [Odoo](https://www.odoo.com/) - Open source ERP and CRM
 - [Docker](https://www.docker.com/) - Container platform
 - [Templ](https://templ.guide/) - Type-safe templating
-- [HTMX](https://htmx.org/) - High power tools for HTML
-- [Alpine.js](https://alpinejs.dev/) - Lightweight JavaScript framework
 
 ---
 

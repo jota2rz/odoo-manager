@@ -20,9 +20,7 @@ function connectSSE() {
     const evt = JSON.parse(e.data);
     const card = document.getElementById('project-' + evt.project_id);
     if (card) {
-      card.style.transition = 'opacity 0.3s, transform 0.3s';
-      card.style.opacity = '0';
-      card.style.transform = 'scale(0.95)';
+      card.classList.add('transition-all', 'duration-300', 'opacity-0', 'scale-95');
       setTimeout(() => {
         card.remove();
         handleEmptyState();
@@ -72,9 +70,7 @@ function upsertProjectCard(project) {
 function removeProjectCard(projectId) {
   const card = document.getElementById('project-' + projectId);
   if (card) {
-    card.style.transition = 'opacity 0.3s, transform 0.3s';
-    card.style.opacity = '0';
-    card.style.transform = 'scale(0.95)';
+    card.classList.add('transition-all', 'duration-300', 'opacity-0', 'scale-95');
     setTimeout(() => {
       card.remove();
       handleEmptyState();
@@ -212,8 +208,7 @@ function setCardPending(projectId, action) {
   // Disable all links (e.g. "Open")
   btnRow.querySelectorAll('a').forEach(link => {
     link.removeAttribute('href');
-    link.style.pointerEvents = 'none';
-    link.classList.add('opacity-70', 'cursor-not-allowed');
+    link.classList.add('pointer-events-none', 'opacity-70', 'cursor-not-allowed');
   });
 
   // Put the spinner on the correct button based on the action
@@ -237,7 +232,7 @@ document.addEventListener('DOMContentLoaded', connectSSE);
 function showCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.remove('hidden');
-  modal.querySelector('.bg-gray-800').classList.add('animate-[modal-fade-in_0.3s_ease-out]');
+  modal.querySelector('.bg-gray-800').classList.add('animate-modal-fade-in');
 }
 
 function hideCreateProjectModal() {
@@ -365,7 +360,7 @@ window.showLogs = function(id) {
   const modal = document.createElement('div');
   modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
   modal.innerHTML = `
-    <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4" style="max-height: 80vh;">
+    <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh]">
       <div class="flex justify-between items-center mb-4">
         <h2 class="text-xl font-bold">Project Logs</h2>
         <div class="flex space-x-2">
@@ -441,8 +436,7 @@ function showNotification(message, type = 'info') {
   document.body.appendChild(notification);
 
   setTimeout(() => {
-    notification.style.opacity = '0';
-    notification.style.transition = 'opacity 0.3s';
+    notification.classList.add('transition-opacity', 'duration-300', 'opacity-0');
     setTimeout(() => notification.remove(), 300);
   }, 3000);
 }
