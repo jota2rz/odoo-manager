@@ -47,8 +47,24 @@ async function createProject(event) {
   }
 }
 
+// Button loading state management
+function setButtonLoading(button, loading) {
+  if (loading) {
+    button.disabled = true;
+    button._originalHTML = button.innerHTML;
+    button.innerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
+    button.classList.add('opacity-70', 'cursor-not-allowed');
+  } else {
+    button.disabled = false;
+    button.innerHTML = button._originalHTML;
+    button.classList.remove('opacity-70', 'cursor-not-allowed');
+  }
+}
+
 // Start project
 window.startProject = async function(id) {
+  const button = event.currentTarget;
+  setButtonLoading(button, true);
   try {
     const response = await fetch(`/api/projects/${id}/start`, {
       method: 'POST'
@@ -60,14 +76,18 @@ window.startProject = async function(id) {
     } else {
       const error = await response.text();
       showNotification('Failed to start project: ' + error, 'error');
+      setButtonLoading(button, false);
     }
   } catch (error) {
     showNotification('Error starting project: ' + error.message, 'error');
+    setButtonLoading(button, false);
   }
 };
 
 // Stop project
 window.stopProject = async function(id) {
+  const button = event.currentTarget;
+  setButtonLoading(button, true);
   try {
     const response = await fetch(`/api/projects/${id}/stop`, {
       method: 'POST'
@@ -79,9 +99,11 @@ window.stopProject = async function(id) {
     } else {
       const error = await response.text();
       showNotification('Failed to stop project: ' + error, 'error');
+      setButtonLoading(button, false);
     }
   } catch (error) {
     showNotification('Error stopping project: ' + error.message, 'error');
+    setButtonLoading(button, false);
   }
 };
 
@@ -91,6 +113,8 @@ window.deleteProject = async function(id) {
     return;
   }
   
+  const button = event.currentTarget;
+  setButtonLoading(button, true);
   try {
     const response = await fetch(`/api/projects/${id}`, {
       method: 'DELETE'
@@ -102,9 +126,11 @@ window.deleteProject = async function(id) {
     } else {
       const error = await response.text();
       showNotification('Failed to delete project: ' + error, 'error');
+      setButtonLoading(button, false);
     }
   } catch (error) {
     showNotification('Error deleting project: ' + error.message, 'error');
+    setButtonLoading(button, false);
   }
 };
 

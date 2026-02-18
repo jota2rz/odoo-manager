@@ -24,7 +24,6 @@ go.work
 cmd/odoo-manager/static/css/style.css
 
 # IDE specific files
-.vscode/
 .idea/
 *.swp
 *.swo

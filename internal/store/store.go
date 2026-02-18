@@ -40,8 +40,17 @@ func NewProjectStore(dbPath string) (*ProjectStore, error) {
 		return nil, err
 	}
 
+	// Limit to 1 open connection to avoid SQLITE_BUSY on concurrent writes
+	db.SetMaxOpenConns(1)
+
 	// Enable WAL mode for better concurrent read performance
 	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	// Set busy timeout to wait up to 5 seconds instead of failing immediately
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000`); err != nil {
 		db.Close()
 		return nil, err
 	}
