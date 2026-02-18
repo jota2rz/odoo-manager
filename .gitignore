@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-odoo-manager
+/odoo-manager
 bin/
 
 # Test binary, built with `go test -c`
