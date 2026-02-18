@@ -1,8 +1,9 @@
+version: 2
+
 project_name: odoo-manager
 
 before:
   hooks:
-    - go mod tidy
     - go install github.com/a-h/templ/cmd/templ@latest
     - templ generate
     - >-
@@ -15,6 +16,7 @@ before:
         chmod +x bin/tailwindcss;
       fi'
     - ./bin/tailwindcss -i src/css/input.css -o cmd/odoo-manager/static/css/style.css --minify
+    - go mod tidy
 
 builds:
   - main: ./cmd/odoo-manager
@@ -38,11 +40,13 @@ builds:
       - -X main.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
 
 checksum:
   name_template: "checksums.txt"
