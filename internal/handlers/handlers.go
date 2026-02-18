@@ -869,7 +869,7 @@ func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 	_ = rc.SetWriteDeadline(time.Time{})
 
 	// Get logs stream
-	logs, err := h.dockerManager.GetLogs(r.Context(), id, containerType)
+	logs, hasTTY, err := h.dockerManager.GetLogs(r.Context(), id, containerType)
 	if err != nil {
 		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
 		return
@@ -883,16 +883,22 @@ func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Docker container logs use a multiplexed stream with 8-byte headers per
-	// frame. Use stdcopy to properly demux stdout+stderr into a clean stream,
-	// then scan line-by-line so ANSI escape sequences are never split.
-	pr, pw := io.Pipe()
-	go func() {
-		defer pw.Close()
-		_, _ = stdcopy.StdCopy(pw, pw, logs)
-	}()
+	// Build a reader: if the container has a TTY the stream is raw (ANSI
+	// colours are preserved as-is). Otherwise Docker multiplexes
+	// stdout/stderr with 8-byte headers; use stdcopy to demux.
+	var reader io.Reader
+	if hasTTY {
+		reader = logs
+	} else {
+		pr, pw := io.Pipe()
+		go func() {
+			defer pw.Close()
+			_, _ = stdcopy.StdCopy(pw, pw, logs)
+		}()
+		reader = pr
+	}
 
-	scanner := bufio.NewScanner(pr)
+	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		select {
 		case <-r.Context().Done():

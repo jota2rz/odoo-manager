@@ -82,6 +82,7 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 		ExposedPorts: nat.PortSet{
 			"8069/tcp": struct{}{},
 		},
+		Tty:    true, // enable TTY so Odoo outputs ANSI colors in logs
 		Labels: projectLabels(project.ID, "odoo"),
 	}
 	odooHostConfig := &container.HostConfig{
@@ -153,6 +154,7 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 		ExposedPorts: nat.PortSet{
 			"8069/tcp": struct{}{},
 		},
+		Tty:    true, // enable TTY so Odoo outputs ANSI colors in logs
 		Labels: projectLabels(project.ID, "odoo"),
 	}
 
@@ -211,9 +213,18 @@ func (m *Manager) StopProject(ctx context.Context, project *store.Project) error
 	return nil
 }
 
-// GetLogs streams logs from a container
-func (m *Manager) GetLogs(ctx context.Context, projectID string, containerType string) (io.ReadCloser, error) {
+// GetLogs streams logs from a container. The returned boolean indicates
+// whether the container has a TTY (raw stream) or not (multiplexed stream
+// that must be demuxed with stdcopy).
+func (m *Manager) GetLogs(ctx context.Context, projectID string, containerType string) (io.ReadCloser, bool, error) {
 	containerName := fmt.Sprintf("%s-%s", containerType, projectID)
+
+	// Inspect the container to check if it has a TTY
+	inspect, err := m.cli.ContainerInspect(ctx, containerName)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to inspect container: %w", err)
+	}
+	hasTTY := inspect.Config.Tty
 
 	options := container.LogsOptions{
 		ShowStdout: true,
@@ -224,10 +235,10 @@ func (m *Manager) GetLogs(ctx context.Context, projectID string, containerType s
 
 	logs, err := m.cli.ContainerLogs(ctx, containerName, options)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get logs: %w", err)
+		return nil, false, fmt.Errorf("failed to get logs: %w", err)
 	}
 
-	return logs, nil
+	return logs, hasTTY, nil
 }
 
 // GetProjectStatus returns the status of project containers
