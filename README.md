@@ -10,6 +10,9 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 - 🎨 **Dark Theme UI** - Modern, responsive interface built with HTMX and Alpine.js
 - 📦 **Embedded Frontend** - All assets embedded in a single binary using Templ
 - 🔧 **Docker Compose Export** - Download docker-compose.yml files for your projects
+- 🗄️ **SQLite Storage** - ACID-compliant project persistence with zero configuration
+- 🏷️ **Docker Labels** - Containers are labeled for reliable discovery and management
+- 🔄 **Status Reconciliation** - Automatically detects and corrects stale container states
 - ⚡ **Fast & Lightweight** - Minimal dependencies, quick startup
 
 ## Prerequisites
@@ -18,16 +21,42 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 - **Docker** (with Docker daemon running)
 - **Git** (for cloning the repository)
 
-## Quick Start
+## Installation
 
-### 1. Clone the repository
+### Download a Pre-built Binary
+
+Download the latest release for your platform from the [GitHub Releases](https://github.com/jota2rz/odoo-manager/releases) page.
+
+Available platforms:
+| OS | Architecture | File |
+|---|---|---|
+| Linux | amd64 | `odoo-manager_*_linux_amd64.tar.gz` |
+| Linux | arm64 | `odoo-manager_*_linux_arm64.tar.gz` |
+| macOS | amd64 (Intel) | `odoo-manager_*_darwin_amd64.tar.gz` |
+| macOS | arm64 (Apple Silicon) | `odoo-manager_*_darwin_arm64.tar.gz` |
+| Windows | amd64 | `odoo-manager_*_windows_amd64.zip` |
+
+Extract and run:
+
+```bash
+# Linux/macOS
+tar xzf odoo-manager_*.tar.gz
+./odoo-manager
+
+# Windows
+# Extract the zip, then run odoo-manager.exe
+```
+
+### Build from Source
+
+#### 1. Clone the repository
 
 ```bash
 git clone https://github.com/jota2rz/odoo-manager.git
 cd odoo-manager
 ```
 
-### 2. Initialize the project
+#### 2. Initialize the project
 
 ```bash
 make init
@@ -38,13 +67,13 @@ This will:
 - Download Go dependencies
 - Generate Templ templates
 
-### 3. Build the application
+#### 3. Build the application
 
 ```bash
 make build
 ```
 
-### 4. Run the application
+#### 4. Run the application
 
 ```bash
 make run
@@ -111,7 +140,11 @@ odoo-manager/
 │   └── js/                # JavaScript
 │       └── app.js
 ├── configs/               # Configuration files
-├── data/                  # Runtime data (projects.json)
+├── data/                  # Runtime data (odoo-manager.db)
+├── .goreleaser.yml       # GoReleaser configuration
+├── .github/
+│   └── workflows/
+│       └── release.yml   # GitHub Actions release workflow
 ├── Makefile              # Build automation
 ├── go.mod                # Go module file
 └── README.md
@@ -165,7 +198,7 @@ PORT=3000 ./odoo-manager
 
 ### Data Persistence
 
-Projects are stored in `data/projects.json`. This file is created automatically on first run.
+Projects are stored in a SQLite database at `data/odoo-manager.db`. The database is created automatically on first run with WAL mode enabled for better concurrent read performance. No external database server is required — everything is embedded in the single binary.
 
 ## Docker Integration
 
@@ -175,6 +208,22 @@ The application uses the Docker SDK for Go to manage containers. Ensure Docker i
 
 - Odoo containers: `odoo-{project-id}`
 - PostgreSQL containers: `postgres-{project-id}`
+
+### Container Labels
+
+All managed containers are tagged with the following Docker labels for reliable discovery:
+
+| Label | Description |
+|---|---|
+| `odoo-manager.project-id` | The project's unique identifier |
+| `odoo-manager.role` | Container role (`odoo` or `postgres`) |
+| `odoo-manager.managed` | Always `true` — marks containers as managed |
+
+You can query managed containers with:
+
+```bash
+docker ps --filter label=odoo-manager.managed=true
+```
 
 ### Default Container Configuration
 
@@ -221,7 +270,7 @@ make build      # Rebuild
 - **HTTP Server**: Standard library `net/http`
 - **Docker SDK**: Official Docker client for Go
 - **Templating**: Templ for type-safe HTML templates
-- **Storage**: JSON file-based persistence
+- **Storage**: SQLite via [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) (pure Go, no CGo)
 
 ### Frontend
 
@@ -233,10 +282,12 @@ make build      # Rebuild
 ### Key Features
 
 1. **Single Binary Deployment**: All assets embedded using Go's embed
-2. **No External Database**: Simple JSON file storage
+2. **Embedded SQLite**: ACID-compliant storage with no external database required
 3. **Real-time Updates**: SSE for log streaming
-4. **Docker Native**: Direct Docker API integration
-5. **Graceful Shutdown**: Proper signal handling
+4. **Docker Native**: Direct Docker API integration with container labels
+5. **Status Reconciliation**: Automatically corrects stale container states
+6. **Graceful Shutdown**: Proper signal handling
+7. **Cross-platform Releases**: Automated builds via GoReleaser + GitHub Actions
 
 ## Contributing
 
@@ -247,6 +298,17 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Releasing
+
+Releases are automated with [GoReleaser](https://goreleaser.com/) and GitHub Actions. To publish a new release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers the release workflow, which cross-compiles for all supported platforms and publishes binaries with checksums to GitHub Releases.
 
 ## License
 
