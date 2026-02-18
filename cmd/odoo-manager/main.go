@@ -25,10 +25,11 @@ var staticFiles embed.FS
 
 func main() {
 	// Initialize project store
-	projectStore, err := store.NewProjectStore("data/projects.json")
+	projectStore, err := store.NewProjectStore("data/odoo-manager.db")
 	if err != nil {
 		log.Fatalf("Failed to initialize project store: %v", err)
 	}
+	defer projectStore.Close()
 
 	// Setup static file server
 	staticFS, err := fs.Sub(staticFiles, "static")

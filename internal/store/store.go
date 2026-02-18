@@ -1,84 +1,124 @@
 package store
 
 import (
-	"encoding/json"
+	"database/sql"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // Project represents an Odoo project configuration
 type Project struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	OdooVersion string    `json:"odoo_version"`
-	PostgresVersion string `json:"postgres_version"`
-	Port        int       `json:"port"`
-	Status      string    `json:"status"` // running, stopped, error
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	OdooVersion     string    `json:"odoo_version"`
+	PostgresVersion string    `json:"postgres_version"`
+	Port            int       `json:"port"`
+	Status          string    `json:"status"` // running, stopped, error
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// ProjectStore manages projects persistence
+// ProjectStore manages projects persistence using SQLite
 type ProjectStore struct {
-	mu       sync.RWMutex
-	projects map[string]*Project
-	filePath string
+	db *sql.DB
 }
 
-// NewProjectStore creates a new project store
-func NewProjectStore(filePath string) (*ProjectStore, error) {
+// NewProjectStore creates a new project store backed by SQLite
+func NewProjectStore(dbPath string) (*ProjectStore, error) {
 	// Ensure directory exists
-	dir := filepath.Dir(filePath)
+	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
-	store := &ProjectStore{
-		projects: make(map[string]*Project),
-		filePath: filePath,
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
 	}
 
-	// Load existing projects if file exists
-	if _, err := os.Stat(filePath); err == nil {
-		if err := store.load(); err != nil {
-			return nil, err
-		}
+	// Enable WAL mode for better concurrent read performance
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		db.Close()
+		return nil, err
 	}
 
-	return store, nil
+	// Create projects table if it doesn't exist
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS projects (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			odoo_version TEXT NOT NULL,
+			postgres_version TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			status TEXT NOT NULL DEFAULT 'stopped',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)
+	`)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &ProjectStore{db: db}, nil
+}
+
+// Close closes the underlying database connection
+func (s *ProjectStore) Close() error {
+	return s.db.Close()
 }
 
 // Create adds a new project
 func (s *ProjectStore) Create(project *Project) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	now := time.Now()
+	project.CreatedAt = now
+	project.UpdatedAt = now
 
-	project.CreatedAt = time.Now()
-	project.UpdatedAt = time.Now()
-	s.projects[project.ID] = project
-
-	return s.save()
+	_, err := s.db.Exec(
+		`INSERT INTO projects (id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		project.ID, project.Name, project.Description, project.OdooVersion,
+		project.PostgresVersion, project.Port, project.Status, project.CreatedAt, project.UpdatedAt,
+	)
+	return err
 }
 
 // Get retrieves a project by ID
 func (s *ProjectStore) Get(id string) (*Project, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	project, ok := s.projects[id]
-	return project, ok
+	p := &Project{}
+	err := s.db.QueryRow(
+		`SELECT id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at
+		 FROM projects WHERE id = ?`, id,
+	).Scan(&p.ID, &p.Name, &p.Description, &p.OdooVersion, &p.PostgresVersion,
+		&p.Port, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return nil, false
+	}
+	return p, true
 }
 
 // List returns all projects
 func (s *ProjectStore) List() []*Project {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	rows, err := s.db.Query(
+		`SELECT id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at
+		 FROM projects ORDER BY created_at DESC`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
 
-	projects := make([]*Project, 0, len(s.projects))
-	for _, p := range s.projects {
+	var projects []*Project
+	for rows.Next() {
+		p := &Project{}
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.OdooVersion, &p.PostgresVersion,
+			&p.Port, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			continue
+		}
 		projects = append(projects, p)
 	}
 	return projects
@@ -86,59 +126,25 @@ func (s *ProjectStore) List() []*Project {
 
 // Update modifies an existing project
 func (s *ProjectStore) Update(project *Project) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.projects[project.ID]; !ok {
-		return os.ErrNotExist
-	}
-
 	project.UpdatedAt = time.Now()
-	s.projects[project.ID] = project
 
-	return s.save()
+	result, err := s.db.Exec(
+		`UPDATE projects SET name=?, description=?, odoo_version=?, postgres_version=?, port=?, status=?, updated_at=?
+		 WHERE id=?`,
+		project.Name, project.Description, project.OdooVersion, project.PostgresVersion,
+		project.Port, project.Status, project.UpdatedAt, project.ID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // Delete removes a project
 func (s *ProjectStore) Delete(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.projects, id)
-	return s.save()
-}
-
-// load reads projects from file
-func (s *ProjectStore) load() error {
-	data, err := os.ReadFile(s.filePath)
-	if err != nil {
-		return err
-	}
-
-	var projects []*Project
-	if err := json.Unmarshal(data, &projects); err != nil {
-		return err
-	}
-
-	s.projects = make(map[string]*Project)
-	for _, p := range projects {
-		s.projects[p.ID] = p
-	}
-
-	return nil
-}
-
-// save writes projects to file
-func (s *ProjectStore) save() error {
-	projects := make([]*Project, 0, len(s.projects))
-	for _, p := range s.projects {
-		projects = append(projects, p)
-	}
-
-	data, err := json.MarshalIndent(projects, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(s.filePath, data, 0644)
+	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	return err
 }
