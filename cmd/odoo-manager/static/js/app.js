@@ -2,7 +2,7 @@
 function showCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.remove('hidden');
-  modal.querySelector('.bg-gray-800').classList.add('modal-enter');
+  modal.querySelector('.bg-gray-800').classList.add('animate-[modal-fade-in_0.3s_ease-out]');
 }
 
 function hideCreateProjectModal() {
@@ -130,7 +130,7 @@ window.showLogs = function(id) {
           <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white">✕</button>
         </div>
       </div>
-      <div id="logViewer" class="log-viewer"></div>
+      <div id="logViewer" class="bg-slate-950 border border-slate-700 rounded-lg p-4 max-h-[500px] overflow-y-auto font-mono text-sm leading-relaxed"></div>
     </div>
   `;
   
@@ -154,16 +154,16 @@ window.showLogs = function(id) {
     
     eventSource.onmessage = function(event) {
       const logLine = document.createElement('div');
-      logLine.className = 'log-line';
+      logLine.className = 'text-slate-200 py-0.5';
       logLine.textContent = event.data;
       
       // Color code based on content
       if (event.data.toLowerCase().includes('error')) {
-        logLine.className += ' log-error';
+        logLine.className += ' text-red-400';
       } else if (event.data.toLowerCase().includes('warning')) {
-        logLine.className += ' log-warning';
+        logLine.className += ' text-yellow-400';
       } else if (event.data.toLowerCase().includes('info')) {
-        logLine.className += ' log-info';
+        logLine.className += ' text-blue-400';
       }
       
       logViewer.appendChild(logLine);
@@ -179,7 +179,7 @@ window.showLogs = function(id) {
       console.error('EventSource error:', error);
       eventSource.close();
       const errorLine = document.createElement('div');
-      errorLine.className = 'log-line log-error';
+      errorLine.className = 'text-slate-200 py-0.5 text-red-400';
       errorLine.textContent = 'Connection to logs lost. Please refresh.';
       logViewer.appendChild(errorLine);
     };
