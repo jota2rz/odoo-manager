@@ -64,7 +64,7 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	projects := h.store.List()
-	
+
 	// Reconcile project statuses with actual Docker state
 	for _, project := range projects {
 		if h.dockerManager != nil {
@@ -94,7 +94,7 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		projects := h.store.List()
-		
+
 		// Reconcile statuses with actual Docker state
 		for _, project := range projects {
 			if h.dockerManager != nil {
@@ -107,7 +107,7 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(projects)
 
@@ -115,6 +115,16 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 		var project store.Project
 		if err := json.NewDecoder(r.Body).Decode(&project); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Validate uniqueness
+		if h.store.NameExists(project.Name, "") {
+			http.Error(w, "A project with this name already exists", http.StatusConflict)
+			return
+		}
+		if h.store.PortExists(project.Port, "") {
+			http.Error(w, "A project with this port already exists", http.StatusConflict)
 			return
 		}
 
@@ -351,7 +361,7 @@ func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 				if len(data) > 8 {
 					data = data[8:]
 				}
-				
+
 				fmt.Fprintf(w, "data: %s\n\n", strings.TrimSpace(string(data)))
 				flusher.Flush()
 			}

@@ -55,21 +55,8 @@ func NewProjectStore(dbPath string) (*ProjectStore, error) {
 		return nil, err
 	}
 
-	// Create projects table if it doesn't exist
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS projects (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			odoo_version TEXT NOT NULL,
-			postgres_version TEXT NOT NULL,
-			port INTEGER NOT NULL,
-			status TEXT NOT NULL DEFAULT 'stopped',
-			created_at DATETIME NOT NULL,
-			updated_at DATETIME NOT NULL
-		)
-	`)
-	if err != nil {
+	// Run schema migrations
+	if err := runMigrations(db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -156,4 +143,26 @@ func (s *ProjectStore) Update(project *Project) error {
 func (s *ProjectStore) Delete(id string) error {
 	_, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
 	return err
+}
+
+// NameExists checks if a project with the given name already exists (optionally excluding an ID)
+func (s *ProjectStore) NameExists(name string, excludeID string) bool {
+	var count int
+	if excludeID != "" {
+		s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE name = ? AND id != ?`, name, excludeID).Scan(&count)
+	} else {
+		s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE name = ?`, name).Scan(&count)
+	}
+	return count > 0
+}
+
+// PortExists checks if a project with the given port already exists (optionally excluding an ID)
+func (s *ProjectStore) PortExists(port int, excludeID string) bool {
+	var count int
+	if excludeID != "" {
+		s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE port = ? AND id != ?`, port, excludeID).Scan(&count)
+	} else {
+		s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE port = ?`, port).Scan(&count)
+	}
+	return count > 0
 }

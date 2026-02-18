@@ -40,10 +40,10 @@ async function createProject(event) {
       window.location.reload();
     } else {
       const error = await response.text();
-      alert('Failed to create project: ' + error);
+      showNotification(error.trim(), 'error');
     }
   } catch (error) {
-    alert('Error creating project: ' + error.message);
+    showNotification('Error creating project: ' + error.message, 'error');
   }
 }
 
