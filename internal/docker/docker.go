@@ -1,9 +1,13 @@
 package docker
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -25,6 +29,12 @@ func NewManager() (*Manager, error) {
 	}
 
 	return &Manager{cli: cli}, nil
+}
+
+// Ping checks whether the Docker daemon is reachable.
+func (m *Manager) Ping(ctx context.Context) error {
+	_, err := m.cli.Ping(ctx)
+	return err
 }
 
 // projectLabels returns the standard labels for a container managed by odoo-manager
@@ -293,4 +303,154 @@ func (m *Manager) pullImage(ctx context.Context, imageName string) error {
 	// Read the response to ensure the pull completes
 	_, err = io.Copy(io.Discard, reader)
 	return err
+}
+
+// ListDatabases runs psql inside the Postgres container and returns the list
+// of databases, excluding system databases (postgres, template0, template1).
+func (m *Manager) ListDatabases(ctx context.Context, projectID string) ([]string, error) {
+	containerName := fmt.Sprintf("postgres-%s", projectID)
+
+	execCfg := container.ExecOptions{
+		Cmd:          []string{"psql", "-U", "odoo", "-d", "postgres", "-t", "-A", "-c", "SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname"},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+
+	execResp, err := m.cli.ContainerExecCreate(ctx, containerName, execCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create exec for listing databases: %w", err)
+	}
+
+	attach, err := m.cli.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to attach to exec: %w", err)
+	}
+	defer attach.Close()
+
+	output, err := io.ReadAll(attach.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read exec output: %w", err)
+	}
+
+	// Parse the output — each line is a database name.
+	// Docker multiplexed streams prepend 8-byte headers per frame.
+	raw := string(output)
+	var databases []string
+	for _, line := range strings.Split(raw, "\n") {
+		name := strings.TrimSpace(line)
+		// Strip potential Docker stream header bytes (non-printable prefix)
+		if idx := strings.IndexFunc(name, func(r rune) bool {
+			return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-'
+		}); idx > 0 {
+			name = name[idx:]
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			databases = append(databases, name)
+		}
+	}
+
+	return databases, nil
+}
+
+// BackupDatabase runs "odoo db dump <database>" inside the Odoo container,
+// redirecting the zip output to a file inside the container while streaming
+// the command's console output (stderr) back to the caller via an io.Reader.
+//
+// The returned execID can be inspected to check whether the command has
+// finished. The caller MUST call the cleanup function when done reading.
+func (m *Manager) BackupDatabase(ctx context.Context, projectID, database string) (logReader io.Reader, execID string, cleanup func(), err error) {
+	containerName := fmt.Sprintf("odoo-%s", projectID)
+	backupPath := "/tmp/odoo_backup.zip"
+
+	// Connect to the linked postgres container (user/password match CreateProject).
+	// Redirect stdout (the zip data) to a file; stderr (progress/errors) stays on console.
+	cmd := fmt.Sprintf("odoo db --db_host postgres --db_port 5432 --db_user odoo --db_password odoo dump %s > %s", database, backupPath)
+
+	execCfg := container.ExecOptions{
+		Cmd:          []string{"sh", "-c", cmd},
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          true, // single stream (no multiplexing headers)
+	}
+
+	execResp, err := m.cli.ContainerExecCreate(ctx, containerName, execCfg)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("failed to create exec for backup: %w", err)
+	}
+
+	attach, err := m.cli.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{Tty: true})
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("failed to attach to exec for backup: %w", err)
+	}
+
+	cleanup = func() {
+		attach.Close()
+	}
+
+	return attach.Reader, execResp.ID, cleanup, nil
+}
+
+// WaitExec blocks until the given exec process finishes and returns its exit code.
+func (m *Manager) WaitExec(ctx context.Context, execID string) (int, error) {
+	for {
+		inspect, err := m.cli.ContainerExecInspect(ctx, execID)
+		if err != nil {
+			return -1, err
+		}
+		if !inspect.Running {
+			return inspect.ExitCode, nil
+		}
+		select {
+		case <-ctx.Done():
+			return -1, ctx.Err()
+		default:
+		}
+	}
+}
+
+// CopyBackupFromContainer copies /tmp/odoo_backup.zip out of the Odoo
+// container and saves it to destPath on the host. It removes the file
+// from the container afterwards.
+func (m *Manager) CopyBackupFromContainer(ctx context.Context, projectID, destPath string) error {
+	containerName := fmt.Sprintf("odoo-%s", projectID)
+	const srcPath = "/tmp/odoo_backup.zip"
+
+	rc, _, err := m.cli.CopyFromContainer(ctx, containerName, srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to copy backup from container: %w", err)
+	}
+	defer rc.Close()
+
+	// CopyFromContainer returns a tar archive — extract the single file.
+	tr := tar.NewReader(rc)
+	_, err = tr.Next()
+	if err != nil {
+		return fmt.Errorf("failed to read tar header: %w", err)
+	}
+
+	// Ensure destination directory exists.
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, tr); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	// Best-effort cleanup inside the container.
+	cleanCfg := container.ExecOptions{
+		Cmd: []string{"rm", "-f", srcPath},
+	}
+	if resp, e := m.cli.ContainerExecCreate(ctx, containerName, cleanCfg); e == nil {
+		_ = m.cli.ContainerExecStart(ctx, resp.ID, container.ExecStartOptions{})
+	}
+
+	return nil
 }

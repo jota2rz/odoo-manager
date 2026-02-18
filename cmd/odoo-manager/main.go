@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jota2rz/odoo-manager/internal/audit"
 	"github.com/jota2rz/odoo-manager/internal/events"
 	"github.com/jota2rz/odoo-manager/internal/handlers"
 	"github.com/jota2rz/odoo-manager/internal/store"
@@ -45,8 +46,20 @@ func main() {
 	// Create event hub for real-time SSE broadcasts
 	eventHub := events.NewHub()
 
+	// Initialize audit logger
+	auditLogger, err := audit.NewLogger("data/audit.log")
+	if err != nil {
+		log.Fatalf("Failed to initialize audit logger: %v", err)
+	}
+	defer auditLogger.Close()
+
 	// Create handler with dependencies
-	handler := handlers.NewHandler(projectStore, staticHandler, eventHub, Version)
+	handler := handlers.NewHandler(projectStore, staticHandler, eventHub, Version, auditLogger)
+
+	// Start background Docker health check
+	healthCtx, healthCancel := context.WithCancel(context.Background())
+	defer healthCancel()
+	handler.StartDockerHealthCheck(healthCtx)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()

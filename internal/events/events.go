@@ -14,6 +14,9 @@ const (
 	ProjectDeleted       EventType = "project_deleted"
 	ProjectStatusChanged EventType = "project_status_changed"
 	ProjectActionPending EventType = "project_action_pending"
+	ProjectBackupPending EventType = "project_backup_pending"
+	ProjectBackupDone    EventType = "project_backup_done"
+	DockerStatus         EventType = "docker_status"
 )
 
 // Event represents a project lifecycle event broadcast to all SSE clients
