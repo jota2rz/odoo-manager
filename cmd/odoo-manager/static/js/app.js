@@ -174,7 +174,6 @@ function buildProjectCard(project) {
     <div class="flex space-x-2">
       ${actionButtons}
       <button onclick="window.showLogs('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="View Logs">📋</button>
-      <button onclick="window.downloadCompose('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="Download docker-compose.yml">⬇️</button>
       <button onclick="window.deleteProject('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-red-400 rounded text-sm" title="Delete Project">🗑️</button>
     </div>
   `;
@@ -358,10 +357,6 @@ window.deleteProject = async function(id) {
     showNotification('Error deleting project: ' + error.message, 'error');
     setButtonLoading(button, false);
   }
-};
-
-window.downloadCompose = function(id) {
-  window.location.href = `/api/projects/${id}/docker-compose`;
 };
 
 // ── Logs Modal ────────────────────────────────────────────────────────

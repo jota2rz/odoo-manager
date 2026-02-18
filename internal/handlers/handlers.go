@@ -57,7 +57,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/projects/{id}/start", h.handleStartProject)
 	mux.HandleFunc("/api/projects/{id}/stop", h.handleStopProject)
 	mux.HandleFunc("/api/projects/{id}/logs", h.handleProjectLogs)
-	mux.HandleFunc("/api/projects/{id}/docker-compose", h.handleDockerCompose)
 
 	// SSE event stream
 	mux.HandleFunc("/api/events", h.handleSSE)
@@ -517,34 +516,6 @@ func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-}
-
-// handleDockerCompose generates docker-compose.yml for a project
-func (h *Handler) handleDockerCompose(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Extract ID from path
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 3 {
-		http.Error(w, "Invalid project ID", http.StatusBadRequest)
-		return
-	}
-	id := parts[2]
-
-	project, ok := h.store.Get(id)
-	if !ok {
-		http.Error(w, "Project not found", http.StatusNotFound)
-		return
-	}
-
-	compose := docker.GenerateDockerCompose(project)
-
-	w.Header().Set("Content-Type", "text/yaml")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=docker-compose-%s.yml", project.Name))
-	w.Write([]byte(compose))
 }
 
 // handleSSE streams real-time project events to all connected clients

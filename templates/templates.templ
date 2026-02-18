@@ -213,13 +213,6 @@ templ ProjectCard(project *store.Project) {
 				📋
 			</button>
 			<button 
-				onclick={ downloadCompose(project.ID) }
-				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-				title="Download docker-compose.yml"
-			>
-				⬇️
-			</button>
-			<button 
 				onclick={ deleteProject(project.ID) }
 				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-red-400 rounded text-sm"
 				title="Delete Project"
@@ -264,10 +257,6 @@ script stopProject(id string) {
 
 script showLogs(id string) {
 	window.showLogs(id);
-}
-
-script downloadCompose(id string) {
-	window.downloadCompose(id);
 }
 
 script deleteProject(id string) {
