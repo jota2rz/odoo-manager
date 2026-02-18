@@ -117,7 +117,7 @@ window.downloadCompose = function(id) {
 window.showLogs = function(id) {
   // Create logs modal
   const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
   modal.innerHTML = `
     <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4" style="max-height: 80vh;">
       <div class="flex justify-between items-center mb-4">
@@ -199,7 +199,7 @@ window.showLogs = function(id) {
 // Show notification
 function showNotification(message, type = 'info') {
   const notification = document.createElement('div');
-  notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 ${
+  notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white ${
     type === 'success' ? 'bg-green-600' : 
     type === 'error' ? 'bg-red-600' : 
     'bg-blue-600'
