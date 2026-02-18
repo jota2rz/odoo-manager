@@ -95,7 +95,7 @@ The application will start on `http://localhost:8080`
 2. Fill in the project details:
    - **Name**: Your project name
    - **Description**: Optional project description
-   - **Odoo Version**: Select from 14.0, 15.0, 16.0, 17.0
+   - **Odoo Version**: Select from 15.0, 16.0, 17.0, 18.0, 19.0
    - **PostgreSQL Version**: Select from 13, 14, 15, 16
    - **Port**: Port to expose Odoo (default: 8069)
 3. Click **"Create"**
