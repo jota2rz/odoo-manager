@@ -36,6 +36,65 @@ func projectLabels(projectID string, role string) map[string]string {
 	}
 }
 
+// CreateProject pulls images and creates containers for a project without starting them.
+func (m *Manager) CreateProject(ctx context.Context, project *store.Project) error {
+	// Create Postgres container
+	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
+	postgresConfig := &container.Config{
+		Image: fmt.Sprintf("postgres:%s", project.PostgresVersion),
+		Env: []string{
+			"POSTGRES_DB=postgres",
+			"POSTGRES_USER=odoo",
+			"POSTGRES_PASSWORD=odoo",
+		},
+		Labels: projectLabels(project.ID, "postgres"),
+	}
+	postgresHostConfig := &container.HostConfig{}
+
+	if !m.containerExists(ctx, postgresContainerName) {
+		if err := m.pullImage(ctx, postgresConfig.Image); err != nil {
+			return fmt.Errorf("failed to pull postgres image: %w", err)
+		}
+		if _, err := m.cli.ContainerCreate(ctx, postgresConfig, postgresHostConfig, nil, nil, postgresContainerName); err != nil {
+			return fmt.Errorf("failed to create postgres container: %w", err)
+		}
+	}
+
+	// Create Odoo container
+	odooContainerName := fmt.Sprintf("odoo-%s", project.ID)
+	odooConfig := &container.Config{
+		Image: fmt.Sprintf("odoo:%s", project.OdooVersion),
+		Env: []string{
+			"HOST=postgres",
+			"USER=odoo",
+			"PASSWORD=odoo",
+		},
+		ExposedPorts: nat.PortSet{
+			"8069/tcp": struct{}{},
+		},
+		Labels: projectLabels(project.ID, "odoo"),
+	}
+	odooHostConfig := &container.HostConfig{
+		Links: []string{fmt.Sprintf("%s:postgres", postgresContainerName)},
+		PortBindings: nat.PortMap{
+			"8069/tcp": []nat.PortBinding{
+				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
+			},
+		},
+	}
+
+	if !m.containerExists(ctx, odooContainerName) {
+		if err := m.pullImage(ctx, odooConfig.Image); err != nil {
+			return fmt.Errorf("failed to pull odoo image: %w", err)
+		}
+		if _, err := m.cli.ContainerCreate(ctx, odooConfig, odooHostConfig, nil, nil, odooContainerName); err != nil {
+			return fmt.Errorf("failed to create odoo container: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // StartProject starts Odoo and Postgres containers for a project
 func (m *Manager) StartProject(ctx context.Context, project *store.Project) error {
 	// Start Postgres container first

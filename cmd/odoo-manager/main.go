@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jota2rz/odoo-manager/internal/events"
 	"github.com/jota2rz/odoo-manager/internal/handlers"
 	"github.com/jota2rz/odoo-manager/internal/store"
 )
@@ -38,8 +39,11 @@ func main() {
 	}
 	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(staticFS)))
 
+	// Create event hub for real-time SSE broadcasts
+	eventHub := events.NewHub()
+
 	// Create handler with dependencies
-	handler := handlers.NewHandler(projectStore, staticHandler)
+	handler := handlers.NewHandler(projectStore, staticHandler, eventHub)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()

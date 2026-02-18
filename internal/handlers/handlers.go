@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jota2rz/odoo-manager/internal/docker"
+	"github.com/jota2rz/odoo-manager/internal/events"
 	"github.com/jota2rz/odoo-manager/internal/store"
 	"github.com/jota2rz/odoo-manager/templates"
 )
@@ -20,10 +22,11 @@ type Handler struct {
 	store         *store.ProjectStore
 	dockerManager *docker.Manager
 	staticFS      http.Handler
+	events        *events.Hub
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler) *Handler {
+func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHub *events.Hub) *Handler {
 	dockerManager, err := docker.NewManager()
 	if err != nil {
 		log.Printf("Warning: Failed to create Docker manager: %v", err)
@@ -33,6 +36,7 @@ func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler) *Handle
 		store:         projectStore,
 		dockerManager: dockerManager,
 		staticFS:      staticFS,
+		events:        eventHub,
 	}
 }
 
@@ -54,6 +58,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/projects/{id}/stop", h.handleStopProject)
 	mux.HandleFunc("/api/projects/{id}/logs", h.handleProjectLogs)
 	mux.HandleFunc("/api/projects/{id}/docker-compose", h.handleDockerCompose)
+
+	// SSE event stream
+	mux.HandleFunc("/api/events", h.handleSSE)
 }
 
 // handleIndex serves the main dashboard page
@@ -129,16 +136,26 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 		}
 
 		project.ID = uuid.New().String()
-		project.Status = "stopped"
+		project.Status = "creating"
 
 		if err := h.store.Create(&project); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		h.events.Publish(events.Event{
+			Type:      events.ProjectCreated,
+			ProjectID: project.ID,
+			Data:      project,
+		})
+
+		// Return immediately so the UI can show the card
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(project)
+
+		// Start containers asynchronously
+		go h.createProjectContainers(project.ID)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -202,6 +219,13 @@ func (h *Handler) handleAPIProject(w http.ResponseWriter, r *http.Request) {
 
 		// Remove containers if they exist
 		if h.dockerManager != nil {
+			// Broadcast pending state so all browsers show a spinner
+			h.events.Publish(events.Event{
+				Type:      events.ProjectActionPending,
+				ProjectID: id,
+				Data:      "deleting",
+			})
+
 			if err := h.dockerManager.RemoveProject(r.Context(), project); err != nil {
 				log.Printf("Warning: Failed to remove containers: %v", err)
 			}
@@ -212,11 +236,67 @@ func (h *Handler) handleAPIProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		h.events.Publish(events.Event{
+			Type:      events.ProjectDeleted,
+			ProjectID: id,
+		})
+
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// createProjectContainers pulls images and creates containers for a newly created project.
+// Runs asynchronously after the create HTTP response has been sent.
+func (h *Handler) createProjectContainers(projectID string) {
+	project, ok := h.store.Get(projectID)
+	if !ok {
+		log.Printf("Warning: project %s not found for container creation", projectID)
+		return
+	}
+
+	h.events.Publish(events.Event{
+		Type:      events.ProjectActionPending,
+		ProjectID: project.ID,
+		Data:      "creating",
+	})
+
+	if h.dockerManager == nil {
+		log.Printf("Warning: Docker manager not available, skipping container creation for %s", projectID)
+		project.Status = "error"
+		_ = h.store.Update(project)
+		h.events.Publish(events.Event{
+			Type:      events.ProjectStatusChanged,
+			ProjectID: project.ID,
+			Data:      project,
+		})
+		return
+	}
+
+	if err := h.dockerManager.CreateProject(context.Background(), project); err != nil {
+		log.Printf("Warning: Failed to create containers for project %s: %v", projectID, err)
+		project.Status = "error"
+		_ = h.store.Update(project)
+		h.events.Publish(events.Event{
+			Type:      events.ProjectStatusChanged,
+			ProjectID: project.ID,
+			Data:      project,
+		})
+		return
+	}
+
+	project.Status = "stopped"
+	if err := h.store.Update(project); err != nil {
+		log.Printf("Warning: Failed to update project status: %v", err)
+	}
+
+	h.events.Publish(events.Event{
+		Type:      events.ProjectStatusChanged,
+		ProjectID: project.ID,
+		Data:      project,
+	})
 }
 
 // handleStartProject starts a project's containers
@@ -245,6 +325,32 @@ func (h *Handler) handleStartProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reconcile with actual Docker state before acting
+	actual := h.dockerManager.ReconcileStatus(r.Context(), project)
+	if actual != project.Status {
+		project.Status = actual
+		_ = h.store.Update(project)
+	}
+	if actual == "running" {
+		// Already in desired state — broadcast to heal stale clients and return success
+		log.Printf("Project %s is already running, treating as success", project.ID)
+		h.events.Publish(events.Event{
+			Type:      events.ProjectStatusChanged,
+			ProjectID: project.ID,
+			Data:      project,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(project)
+		return
+	}
+
+	// Broadcast pending state so all browsers show a spinner
+	h.events.Publish(events.Event{
+		Type:      events.ProjectActionPending,
+		ProjectID: project.ID,
+		Data:      "starting",
+	})
+
 	if err := h.dockerManager.StartProject(r.Context(), project); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to start project: %v", err), http.StatusInternalServerError)
 		return
@@ -254,6 +360,12 @@ func (h *Handler) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Update(project); err != nil {
 		log.Printf("Warning: Failed to update project status: %v", err)
 	}
+
+	h.events.Publish(events.Event{
+		Type:      events.ProjectStatusChanged,
+		ProjectID: project.ID,
+		Data:      project,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(project)
@@ -285,6 +397,32 @@ func (h *Handler) handleStopProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reconcile with actual Docker state before acting
+	actual := h.dockerManager.ReconcileStatus(r.Context(), project)
+	if actual != project.Status {
+		project.Status = actual
+		_ = h.store.Update(project)
+	}
+	if actual == "stopped" {
+		// Already in desired state — broadcast to heal stale clients and return success
+		log.Printf("Project %s is already stopped, treating as success", project.ID)
+		h.events.Publish(events.Event{
+			Type:      events.ProjectStatusChanged,
+			ProjectID: project.ID,
+			Data:      project,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(project)
+		return
+	}
+
+	// Broadcast pending state so all browsers show a spinner
+	h.events.Publish(events.Event{
+		Type:      events.ProjectActionPending,
+		ProjectID: project.ID,
+		Data:      "stopping",
+	})
+
 	if err := h.dockerManager.StopProject(r.Context(), project); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to stop project: %v", err), http.StatusInternalServerError)
 		return
@@ -294,6 +432,12 @@ func (h *Handler) handleStopProject(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Update(project); err != nil {
 		log.Printf("Warning: Failed to update project status: %v", err)
 	}
+
+	h.events.Publish(events.Event{
+		Type:      events.ProjectStatusChanged,
+		ProjectID: project.ID,
+		Data:      project,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(project)
@@ -324,6 +468,10 @@ func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Disable the server's WriteTimeout for this long-lived connection
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
 
 	// Get logs stream
 	logs, err := h.dockerManager.GetLogs(r.Context(), id, containerType)
@@ -397,4 +545,54 @@ func (h *Handler) handleDockerCompose(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/yaml")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=docker-compose-%s.yml", project.Name))
 	w.Write([]byte(compose))
+}
+
+// handleSSE streams real-time project events to all connected clients
+func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Disable the server's WriteTimeout for this long-lived connection
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	ch := h.events.Subscribe()
+	defer h.events.Unsubscribe(ch)
+
+	// Send initial keepalive so the client knows the connection is open
+	fmt.Fprintf(w, ": connected\n\n")
+	flusher.Flush()
+
+	// Keepalive ticker prevents idle-timeout disconnections
+	keepalive := time.NewTicker(30 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-keepalive.C:
+			// SSE comment line — keeps the connection alive without triggering client events
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+		case evt, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, err := json.Marshal(evt)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.Type, data)
+			flusher.Flush()
+		}
+	}
 }

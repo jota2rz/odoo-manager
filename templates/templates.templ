@@ -132,19 +132,21 @@ templ Index(projects []*store.Project) {
 		</div>
 		
 		if len(projects) == 0 {
-			<div class="bg-gray-800 rounded-lg p-8 text-center">
-				<div class="text-6xl mb-4">📦</div>
-				<h3 class="text-xl font-semibold mb-2">No projects yet</h3>
-				<p class="text-gray-400 mb-4">Get started by creating your first Odoo project</p>
-				<button 
-					onclick="showCreateProjectModal()" 
-					class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded"
-				>
-					Create Your First Project
-				</button>
+			<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				<div data-empty class="bg-gray-800 rounded-lg p-8 text-center">
+					<div class="text-6xl mb-4">📦</div>
+					<h3 class="text-xl font-semibold mb-2">No projects yet</h3>
+					<p class="text-gray-400 mb-4">Get started by creating your first Odoo project</p>
+					<button 
+						onclick="showCreateProjectModal()" 
+						class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded"
+					>
+						Create Your First Project
+					</button>
+				</div>
 			</div>
 		} else {
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+			<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 				for _, project := range projects {
 					@ProjectCard(project)
 				}
@@ -154,7 +156,7 @@ templ Index(projects []*store.Project) {
 }
 
 templ ProjectCard(project *store.Project) {
-	<div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-colors">
+	<div id={ "project-" + project.ID } data-project-id={ project.ID } data-port={ fmt.Sprintf("%d", project.Port) } class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-colors">
 		<div class="flex items-start justify-between mb-4">
 			<div>
 				<h3 class="text-xl font-semibold mb-1">{ project.Name }</h3>
@@ -231,7 +233,7 @@ templ ProjectCard(project *store.Project) {
 templ ProjectsList(projects []*store.Project) {
 	@Layout("Projects") {
 		<h2 class="text-3xl font-bold mb-6">Projects</h2>
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+		<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 			for _, project := range projects {
 				@ProjectCard(project)
 			}
