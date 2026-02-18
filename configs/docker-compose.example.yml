@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres-example
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=odoo
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - odoo-network
+
+  odoo:
+    image: odoo:16.0
+    container_name: odoo-example
+    depends_on:
+      - postgres
+    ports:
+      - "8069:8069"
+    environment:
+      - HOST=postgres
+      - USER=odoo
+      - PASSWORD=odoo
+    volumes:
+      - odoo-data:/var/lib/odoo
+      - ./addons:/mnt/extra-addons
+    networks:
+      - odoo-network
+
+volumes:
+  postgres-data:
+  odoo-data:
+
+networks:
+  odoo-network:
+    driver: bridge

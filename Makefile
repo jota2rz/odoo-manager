@@ -28,7 +28,8 @@ deps:
 # Generate Templ templates
 templ:
 	@echo "Generating Templ templates..."
-	templ generate
+	@which templ > /dev/null || (echo "Templ not found. Installing..." && go install github.com/a-h/templ/cmd/templ@latest)
+	@$(HOME)/go/bin/templ generate || templ generate
 	@echo "Templates generated!"
 
 # Build the application
