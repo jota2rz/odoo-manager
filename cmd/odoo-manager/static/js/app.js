@@ -2,11 +2,25 @@
 // Connects to /api/events and keeps the UI in sync without page reloads.
 
 let eventSource = null;
+let _appVersion = null;
 
 function connectSSE() {
   if (eventSource) eventSource.close();
 
   eventSource = new EventSource('/api/events');
+
+  // On every (re)connection the server sends the current app version.
+  // If the version changed since the previous connection a new binary is
+  // running and the browser must do a hard reload to pick up new assets.
+  eventSource.addEventListener('version', (e) => {
+    const serverVersion = e.data;
+    if (_appVersion && _appVersion !== serverVersion) {
+      console.warn('Application updated (' + _appVersion + ' → ' + serverVersion + '), reloading…');
+      location.reload();
+      return;
+    }
+    _appVersion = serverVersion;
+  });
 
   eventSource.addEventListener('project_created', (e) => {
     const evt = JSON.parse(e.data);

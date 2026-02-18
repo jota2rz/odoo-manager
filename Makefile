@@ -62,9 +62,10 @@ tailwind:
 	@echo "Tailwind CSS built!"
 
 # Build the application
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || date +%Y%m%d%H%M%S)
 build: templ tailwind
-	@echo "Building application..."
-	go build -o odoo-manager ./cmd/odoo-manager
+	@echo "Building application (version=$(VERSION))..."
+	go build -ldflags "-X main.Version=$(VERSION)" -o odoo-manager ./cmd/odoo-manager
 	@echo "Build complete! Binary: ./odoo-manager"
 
 # Run the application

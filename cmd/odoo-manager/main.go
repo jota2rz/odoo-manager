@@ -17,6 +17,9 @@ import (
 	"github.com/jota2rz/odoo-manager/internal/store"
 )
 
+// Version is set at build time via -ldflags; falls back to "dev".
+var Version = "dev"
+
 const (
 	defaultPort = "8080"
 )
@@ -43,7 +46,7 @@ func main() {
 	eventHub := events.NewHub()
 
 	// Create handler with dependencies
-	handler := handlers.NewHandler(projectStore, staticHandler, eventHub)
+	handler := handlers.NewHandler(projectStore, staticHandler, eventHub, Version)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()

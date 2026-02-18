@@ -23,10 +23,11 @@ type Handler struct {
 	dockerManager *docker.Manager
 	staticFS      http.Handler
 	events        *events.Hub
+	version       string
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHub *events.Hub) *Handler {
+func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHub *events.Hub, version string) *Handler {
 	dockerManager, err := docker.NewManager()
 	if err != nil {
 		log.Printf("Warning: Failed to create Docker manager: %v", err)
@@ -37,6 +38,7 @@ func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHu
 		dockerManager: dockerManager,
 		staticFS:      staticFS,
 		events:        eventHub,
+		version:       version,
 	}
 }
 
@@ -538,8 +540,8 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch := h.events.Subscribe()
 	defer h.events.Unsubscribe(ch)
 
-	// Send initial keepalive so the client knows the connection is open
-	fmt.Fprintf(w, ": connected\n\n")
+	// Send the application version so the client can detect updates on reconnect
+	fmt.Fprintf(w, "event: version\ndata: %s\n\n", h.version)
 	flusher.Flush()
 
 	// Keepalive ticker prevents idle-timeout disconnections
