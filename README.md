@@ -1,1 +1,269 @@
-# odoo-manager
+# 🐳 Odoo Manager
+
+A modern web application for managing Odoo and PostgreSQL Docker containers locally. Built with Go, Templ, HTMX, and Alpine.js, featuring a sleek dark theme and real-time log streaming.
+
+## Features
+
+- 🚀 **Easy Project Management** - Create, start, stop, and delete Odoo projects with a few clicks
+- 🐳 **Docker Integration** - Automatic management of Odoo and PostgreSQL containers
+- 📊 **Real-time Logs** - Stream container logs in real-time using Server-Sent Events (SSE)
+- 🎨 **Dark Theme UI** - Modern, responsive interface built with HTMX and Alpine.js
+- 📦 **Embedded Frontend** - All assets embedded in a single binary using Templ
+- 🔧 **Docker Compose Export** - Download docker-compose.yml files for your projects
+- ⚡ **Fast & Lightweight** - Minimal dependencies, quick startup
+
+## Prerequisites
+
+- **Go** 1.21 or higher
+- **Docker** (with Docker daemon running)
+- **Git** (for cloning the repository)
+
+## Quick Start
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/jota2rz/odoo-manager.git
+cd odoo-manager
+```
+
+### 2. Initialize the project
+
+```bash
+make init
+```
+
+This will:
+- Install required tools (Templ)
+- Download Go dependencies
+- Generate Templ templates
+
+### 3. Build the application
+
+```bash
+make build
+```
+
+### 4. Run the application
+
+```bash
+make run
+```
+
+Or simply run the binary directly:
+
+```bash
+./odoo-manager
+```
+
+The application will start on `http://localhost:8080`
+
+## Usage
+
+### Creating a Project
+
+1. Click the **"+ New Project"** button
+2. Fill in the project details:
+   - **Name**: Your project name
+   - **Description**: Optional project description
+   - **Odoo Version**: Select from 14.0, 15.0, 16.0, 17.0
+   - **PostgreSQL Version**: Select from 13, 14, 15, 16
+   - **Port**: Port to expose Odoo (default: 8069)
+3. Click **"Create"**
+
+### Managing Projects
+
+- **Start**: Click the green "Start" button to launch containers
+- **Stop**: Click the red "Stop" button to stop running containers
+- **Open**: Click "Open" to access the running Odoo instance
+- **View Logs**: Click the 📋 icon to stream real-time logs
+- **Download Compose**: Click the ⬇️ icon to download docker-compose.yml
+- **Delete**: Click the 🗑️ icon to remove the project and its containers
+
+### Viewing Logs
+
+1. Click the 📋 icon on any project
+2. Select the container (Odoo or PostgreSQL) from the dropdown
+3. View real-time logs with color-coded output
+4. Logs automatically scroll to show the latest entries
+
+## Development
+
+### Project Structure
+
+```
+odoo-manager/
+├── cmd/
+│   └── odoo-manager/      # Main application entry point
+│       └── main.go
+├── internal/
+│   ├── docker/            # Docker operations
+│   │   └── docker.go
+│   ├── handlers/          # HTTP handlers and routes
+│   │   └── handlers.go
+│   └── store/             # Project persistence
+│       └── store.go
+├── templates/             # Templ templates
+│   └── templates.templ
+├── static/
+│   ├── css/               # Stylesheets
+│   │   └── style.css
+│   └── js/                # JavaScript
+│       └── app.js
+├── configs/               # Configuration files
+├── data/                  # Runtime data (projects.json)
+├── Makefile              # Build automation
+├── go.mod                # Go module file
+└── README.md
+```
+
+### Available Commands
+
+```bash
+make help       # Show all available commands
+make install    # Install development tools
+make deps       # Download Go dependencies
+make templ      # Generate Templ templates
+make build      # Build the application
+make run        # Build and run
+make dev        # Run with auto-reload (requires air)
+make clean      # Clean build artifacts
+make test       # Run tests
+make fmt        # Format code
+make lint       # Lint code
+```
+
+### Development Mode
+
+For development with auto-reload:
+
+```bash
+make dev
+```
+
+This uses [Air](https://github.com/cosmtrek/air) for live reloading during development.
+
+### Modifying Templates
+
+Templates are written in [Templ](https://templ.guide/). After editing `.templ` files:
+
+```bash
+make templ  # Regenerate Go code from templates
+make build  # Rebuild the application
+```
+
+## Configuration
+
+### Environment Variables
+
+- `PORT` - Server port (default: 8080)
+
+Example:
+```bash
+PORT=3000 ./odoo-manager
+```
+
+### Data Persistence
+
+Projects are stored in `data/projects.json`. This file is created automatically on first run.
+
+## Docker Integration
+
+The application uses the Docker SDK for Go to manage containers. Ensure Docker is running before starting the application.
+
+### Container Naming Convention
+
+- Odoo containers: `odoo-{project-id}`
+- PostgreSQL containers: `postgres-{project-id}`
+
+### Default Container Configuration
+
+**PostgreSQL:**
+- Image: `postgres:{version}`
+- Database: `postgres`
+- User: `odoo`
+- Password: `odoo`
+
+**Odoo:**
+- Image: `odoo:{version}`
+- Port: Configurable per project
+- Linked to PostgreSQL container
+
+## Troubleshooting
+
+### Docker Connection Issues
+
+If you see "Docker manager not available":
+- Ensure Docker is running: `docker ps`
+- Check Docker socket permissions
+- On Linux: Add your user to the docker group
+
+### Port Already in Use
+
+If a port is already in use:
+- Choose a different port when creating the project
+- Stop any conflicting services
+- Check running containers: `docker ps`
+
+### Build Errors
+
+If you encounter build errors:
+```bash
+make clean      # Clean old artifacts
+make deps       # Refresh dependencies
+make build      # Rebuild
+```
+
+## Architecture
+
+### Backend (Go)
+
+- **HTTP Server**: Standard library `net/http`
+- **Docker SDK**: Official Docker client for Go
+- **Templating**: Templ for type-safe HTML templates
+- **Storage**: JSON file-based persistence
+
+### Frontend
+
+- **HTMX**: Dynamic HTML over the wire
+- **Alpine.js**: Lightweight JavaScript reactivity
+- **Vanilla CSS**: Custom dark theme
+- **SSE**: Real-time log streaming
+
+### Key Features
+
+1. **Single Binary Deployment**: All assets embedded using Go's embed
+2. **No External Database**: Simple JSON file storage
+3. **Real-time Updates**: SSE for log streaming
+4. **Docker Native**: Direct Docker API integration
+5. **Graceful Shutdown**: Proper signal handling
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is open source and available under the MIT License.
+
+## Support
+
+For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/jota2rz/odoo-manager).
+
+## Acknowledgments
+
+- [Odoo](https://www.odoo.com/) - Open source ERP and CRM
+- [Docker](https://www.docker.com/) - Container platform
+- [Templ](https://templ.guide/) - Type-safe templating
+- [HTMX](https://htmx.org/) - High power tools for HTML
+- [Alpine.js](https://alpinejs.dev/) - Lightweight JavaScript framework
+
+---
+
+**Made with ❤️ for the Odoo community**
