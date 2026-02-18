@@ -27,6 +27,15 @@ func NewManager() (*Manager, error) {
 	return &Manager{cli: cli}, nil
 }
 
+// projectLabels returns the standard labels for a container managed by odoo-manager
+func projectLabels(projectID string, role string) map[string]string {
+	return map[string]string{
+		"odoo-manager.project-id": projectID,
+		"odoo-manager.role":       role,
+		"odoo-manager.managed":    "true",
+	}
+}
+
 // StartProject starts Odoo and Postgres containers for a project
 func (m *Manager) StartProject(ctx context.Context, project *store.Project) error {
 	// Start Postgres container first
@@ -38,6 +47,7 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 			"POSTGRES_USER=odoo",
 			"POSTGRES_PASSWORD=odoo",
 		},
+		Labels: projectLabels(project.ID, "postgres"),
 	}
 
 	postgresHostConfig := &container.HostConfig{}
@@ -74,6 +84,7 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 		ExposedPorts: nat.PortSet{
 			"8069/tcp": struct{}{},
 		},
+		Labels: projectLabels(project.ID, "odoo"),
 	}
 
 	odooHostConfig := &container.HostConfig{
@@ -169,6 +180,16 @@ func (m *Manager) GetProjectStatus(ctx context.Context, projectID string) (strin
 	return "stopped", nil
 }
 
+// ReconcileStatus checks the actual Docker state and returns the real status,
+// correcting any stale status stored in the project.
+func (m *Manager) ReconcileStatus(ctx context.Context, project *store.Project) string {
+	status, err := m.GetProjectStatus(ctx, project.ID)
+	if err != nil {
+		return "error"
+	}
+	return status
+}
+
 // RemoveProject removes containers for a project
 func (m *Manager) RemoveProject(ctx context.Context, project *store.Project) error {
 	odooContainerName := fmt.Sprintf("odoo-%s", project.ID)
@@ -227,6 +248,10 @@ services:
       - POSTGRES_DB=postgres
       - POSTGRES_USER=odoo
       - POSTGRES_PASSWORD=odoo
+    labels:
+      odoo-manager.project-id: "%s"
+      odoo-manager.role: "postgres"
+      odoo-manager.managed: "true"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
@@ -243,6 +268,10 @@ services:
       - HOST=postgres
       - USER=odoo
       - PASSWORD=odoo
+    labels:
+      odoo-manager.project-id: "%s"
+      odoo-manager.role: "odoo"
+      odoo-manager.managed: "true"
     volumes:
       - odoo-data:/var/lib/odoo
       - ./addons:/mnt/extra-addons
@@ -256,5 +285,5 @@ volumes:
 networks:
   odoo-network:
     driver: bridge
-`, project.PostgresVersion, project.ID, project.OdooVersion, project.ID, project.Port)
+`, project.PostgresVersion, project.ID, project.ID, project.OdooVersion, project.ID, project.Port, project.ID)
 }

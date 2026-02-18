@@ -65,12 +65,15 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	projects := h.store.List()
 	
-	// Update project statuses
+	// Reconcile project statuses with actual Docker state
 	for _, project := range projects {
 		if h.dockerManager != nil {
-			status, err := h.dockerManager.GetProjectStatus(r.Context(), project.ID)
-			if err == nil {
-				project.Status = status
+			reconciled := h.dockerManager.ReconcileStatus(r.Context(), project)
+			if reconciled != project.Status {
+				project.Status = reconciled
+				if err := h.store.Update(project); err != nil {
+					log.Printf("Warning: Failed to reconcile status for project %s: %v", project.ID, err)
+				}
 			}
 		}
 	}
@@ -92,12 +95,15 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		projects := h.store.List()
 		
-		// Update statuses
+		// Reconcile statuses with actual Docker state
 		for _, project := range projects {
 			if h.dockerManager != nil {
-				status, err := h.dockerManager.GetProjectStatus(r.Context(), project.ID)
-				if err == nil {
-					project.Status = status
+				reconciled := h.dockerManager.ReconcileStatus(r.Context(), project)
+				if reconciled != project.Status {
+					project.Status = reconciled
+					if err := h.store.Update(project); err != nil {
+						log.Printf("Warning: Failed to reconcile status for project %s: %v", project.ID, err)
+					}
 				}
 			}
 		}
@@ -147,11 +153,14 @@ func (h *Handler) handleAPIProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Update status
+		// Reconcile status with actual Docker state
 		if h.dockerManager != nil {
-			status, err := h.dockerManager.GetProjectStatus(r.Context(), project.ID)
-			if err == nil {
-				project.Status = status
+			reconciled := h.dockerManager.ReconcileStatus(r.Context(), project)
+			if reconciled != project.Status {
+				project.Status = reconciled
+				if err := h.store.Update(project); err != nil {
+					log.Printf("Warning: Failed to reconcile status for project %s: %v", project.ID, err)
+				}
 			}
 		}
 
