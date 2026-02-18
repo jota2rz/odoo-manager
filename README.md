@@ -7,12 +7,18 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 - 🚀 **Easy Project Management** - Create, start, stop, and delete Odoo projects with a few clicks
 - 🐳 **Docker Integration** - Automatic management of Odoo and PostgreSQL containers
 - 📡 **Real-time UI** - Live project status, spinner sync, and log streaming across all browsers via Server-Sent Events (SSE)
-- 🎨 **Dark Theme UI** - Modern, responsive interface built with Tailwind CSS
+- 💾 **Database Backup** - One-click database backup with real-time progress streaming and automatic download
+- 📋 **Audit Log** - Full audit trail of all client-to-server events with real-time viewer, file logging, and scroll-back pagination
+- 🎨 **Dark Theme UI** - Modern, responsive interface built with Tailwind CSS and Heroicons SVGs
 - 📦 **Embedded Frontend** - All assets embedded in a single binary using Templ
 - 🗄️ **SQLite Storage** - ACID-compliant project persistence with automatic schema migrations
 - 🏷️ **Docker Labels** - Containers are labeled for reliable discovery and management
 - 🔄 **Status Reconciliation** - Automatically detects and corrects stale container states
-- 🔒 **Idempotent Operations** - Start/stop actions are safe to repeat and sync across browsers
+- 🔒 **Idempotent Operations** - Start/stop/delete actions are async, safe to repeat, and sync across browsers
+- 🩺 **Docker Health Check** - Continuous monitoring of Docker daemon connectivity with automatic UI overlay
+- 🔗 **Connection Recovery** - Automatic SSE reconnection with version-based reload and full-screen overlay
+- 🌈 **ANSI Color Support** - Terminal colors rendered faithfully in log viewers
+- 🌐 **Reverse Proxy Aware** - Client IP detection via `X-Forwarded-For` and `X-Real-Ip` headers
 - ⚡ **Fast & Lightweight** - Minimal dependencies, quick startup
 
 ## Prerequisites
@@ -108,17 +114,34 @@ The application will start on `http://localhost:8080`
 - **Start**: Click the green "Start" button to launch containers
 - **Stop**: Click the red "Stop" button to stop running containers
 - **Open**: Click "Open" to access the running Odoo instance (visible only when running)
-- **View Logs**: Click the 📋 icon to stream real-time logs
-- **Delete**: Click the 🗑️ icon to remove the project and its containers
+- **Backup**: Click the database icon to back up a database (visible only when running)
+- **View Logs**: Click the document icon to stream real-time container logs
+- **Delete**: Click the trash icon to remove the project and its containers
 
-All actions are reflected in real time across every open browser tab via SSE.
+All actions are asynchronous and reflected in real time across every open browser tab via SSE. Start, stop, and delete operations return immediately while Docker work runs in the background.
 
 ### Viewing Logs
 
-1. Click the 📋 icon on any project
+1. Click the document icon on any project
 2. Select the container (Odoo or PostgreSQL) from the dropdown
-3. View real-time logs with color-coded output
+3. View real-time logs with full ANSI terminal color rendering
 4. Logs automatically scroll to show the latest entries
+
+### Database Backup
+
+1. Click the database icon on a running project
+2. If the project has multiple databases, a picker modal appears — select one
+3. A log modal streams real-time backup progress from the container
+4. Once complete, the backup `.zip` file downloads automatically
+5. Only one backup per project can run at a time (enforced across all browsers)
+
+### Audit Log
+
+1. Click **"Audit"** in the navigation bar
+2. View all client-to-server API events in real time
+3. Each entry shows timestamp, client IP, HTTP method, path, and description
+4. Scroll up to load older log entries (100 lines per page)
+5. Audit entries are also written to `data/audit.log` and the server console
 
 ## Development
 
@@ -135,7 +158,9 @@ odoo-manager/
 │           └── js/
 │               └── app.js    # SSE client, card rendering, API actions
 ├── internal/
-│   ├── docker/              # Docker container lifecycle
+│   ├── audit/               # Audit logging (file + console + SSE)
+│   │   └── audit.go
+│   ├── docker/              # Docker container lifecycle & backup
 │   │   └── docker.go
 │   ├── events/              # SSE event hub (pub/sub)
 │   │   └── events.go
@@ -149,7 +174,7 @@ odoo-manager/
 │       └── input.css        # Tailwind CSS source
 ├── templates/               # Templ HTML templates
 │   └── templates.templ
-├── data/                    # Runtime data (odoo-manager.db)
+├── data/                    # Runtime data (odoo-manager.db, audit.log, backups/)
 ├── .goreleaser.yml          # GoReleaser configuration
 ├── .github/
 │   └── workflows/
@@ -211,6 +236,8 @@ PORT=3000 ./odoo-manager
 ### Data Persistence
 
 Projects are stored in a SQLite database at `data/odoo-manager.db`. The database is created automatically on first run with WAL mode enabled for better concurrent read performance. Schema changes are applied automatically via versioned migrations (`PRAGMA user_version`). Unique constraints on project names and ports prevent duplicates. No external database server is required — everything is embedded in the single binary.
+
+Audit entries are appended to `data/audit.log` in a human-readable format. Database backups are temporarily stored in `data/backups/` and cleaned up after download.
 
 ## Docker Integration
 
@@ -293,13 +320,17 @@ make build      # Rebuild
 
 1. **Single Binary Deployment**: All assets embedded using Go's embed
 2. **Embedded SQLite**: ACID-compliant storage with automatic schema migrations and unique constraints
-3. **Real-time UI**: SSE broadcasts project status changes, pending actions, and log streams to all connected browsers instantly
-4. **Docker Native**: Direct Docker API integration with container labels
+3. **Real-time UI**: SSE broadcasts project status changes, pending actions, backup progress, and log streams to all connected browsers instantly
+4. **Docker Native**: Direct Docker API integration with container labels and health monitoring
 5. **Auto-provisioning**: Containers are pulled and created in the background as soon as a project is created
-6. **Idempotent Actions**: Start/stop operations reconcile with Docker state and are safe to repeat
-7. **Status Reconciliation**: Automatically corrects stale container states
-8. **Graceful Shutdown**: Proper signal handling
-9. **Cross-platform Releases**: Automated builds via GoReleaser + GitHub Actions
+6. **Async Operations**: Start, stop, and delete run in background goroutines to avoid HTTP timeouts
+7. **Database Backup**: Runs `odoo db dump` inside the container, streams progress via SSE, and copies the backup file out
+8. **Audit Trail**: Every API request is logged to file, console, and streamed live to the Audit page with client IP tracking
+9. **Connection Resilience**: SSE auto-reconnect with version-based reload, connection-lost overlay, and Docker-down overlay
+10. **ANSI Color Rendering**: Full terminal color support in log and backup viewers via client-side conversion
+11. **Status Reconciliation**: Automatically corrects stale container states
+12. **Graceful Shutdown**: Proper signal handling
+13. **Cross-platform Releases**: Automated builds via GoReleaser + GitHub Actions
 
 ## Contributing
 
