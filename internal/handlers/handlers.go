@@ -232,7 +232,9 @@ func (h *Handler) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	project.Status = "running"
-	h.store.Update(project)
+	if err := h.store.Update(project); err != nil {
+		log.Printf("Warning: Failed to update project status: %v", err)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(project)
@@ -270,7 +272,9 @@ func (h *Handler) handleStopProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	project.Status = "stopped"
-	h.store.Update(project)
+	if err := h.store.Update(project); err != nil {
+		log.Printf("Warning: Failed to update project status: %v", err)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(project)
