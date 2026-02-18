@@ -21,6 +21,7 @@ go.work
 
 # Generated files
 *_templ.go
+cmd/odoo-manager/static/css/style.css
 
 # IDE specific files
 .vscode/
