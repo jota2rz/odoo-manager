@@ -1,0 +1,272 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/jota2rz/odoo-manager/internal/store"
+)
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en" class="dark">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ title } - Odoo Manager</title>
+			<link rel="stylesheet" href="/static/css/style.css"/>
+			<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+			<script src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js" defer></script>
+		</head>
+		<body class="bg-gray-900 text-gray-100 min-h-screen">
+			<nav class="bg-gray-800 border-b border-gray-700">
+				<div class="container mx-auto px-4 py-4">
+					<div class="flex items-center justify-between">
+						<div class="flex items-center space-x-4">
+							<h1 class="text-2xl font-bold text-blue-400">🐳 Odoo Manager</h1>
+							<a href="/" class="text-gray-300 hover:text-white">Dashboard</a>
+						</div>
+						<div class="flex items-center space-x-4">
+							<button 
+								class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+								onclick="showCreateProjectModal()"
+							>
+								+ New Project
+							</button>
+						</div>
+					</div>
+				</div>
+			</nav>
+			<main class="container mx-auto px-4 py-8">
+				{ children... }
+			</main>
+			
+			<!-- Create Project Modal -->
+			<div id="createProjectModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+				<div class="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+					<h2 class="text-xl font-bold mb-4">Create New Project</h2>
+					<form id="createProjectForm" onsubmit="createProject(event)">
+						<div class="mb-4">
+							<label class="block text-sm font-medium mb-2">Project Name</label>
+							<input 
+								type="text" 
+								name="name" 
+								required 
+								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+							/>
+						</div>
+						<div class="mb-4">
+							<label class="block text-sm font-medium mb-2">Description</label>
+							<textarea 
+								name="description" 
+								rows="3" 
+								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+							></textarea>
+						</div>
+						<div class="mb-4">
+							<label class="block text-sm font-medium mb-2">Odoo Version</label>
+							<select 
+								name="odoo_version" 
+								required 
+								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+							>
+								<option value="17.0">17.0</option>
+								<option value="16.0" selected>16.0</option>
+								<option value="15.0">15.0</option>
+								<option value="14.0">14.0</option>
+							</select>
+						</div>
+						<div class="mb-4">
+							<label class="block text-sm font-medium mb-2">PostgreSQL Version</label>
+							<select 
+								name="postgres_version" 
+								required 
+								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+							>
+								<option value="16">16</option>
+								<option value="15" selected>15</option>
+								<option value="14">14</option>
+								<option value="13">13</option>
+							</select>
+						</div>
+						<div class="mb-4">
+							<label class="block text-sm font-medium mb-2">Port</label>
+							<input 
+								type="number" 
+								name="port" 
+								value="8069" 
+								required 
+								min="1024" 
+								max="65535"
+								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
+							/>
+						</div>
+						<div class="flex justify-end space-x-2">
+							<button 
+								type="button" 
+								onclick="hideCreateProjectModal()" 
+								class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
+							>
+								Cancel
+							</button>
+							<button 
+								type="submit" 
+								class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
+							>
+								Create
+							</button>
+						</div>
+					</form>
+				</div>
+			</div>
+			
+			<script src="/static/js/app.js"></script>
+		</body>
+	</html>
+}
+
+templ Index(projects []*store.Project) {
+	@Layout("Dashboard") {
+		<div class="mb-8">
+			<h2 class="text-3xl font-bold mb-2">Dashboard</h2>
+			<p class="text-gray-400">Manage your Odoo projects and containers</p>
+		</div>
+		
+		if len(projects) == 0 {
+			<div class="bg-gray-800 rounded-lg p-8 text-center">
+				<div class="text-6xl mb-4">📦</div>
+				<h3 class="text-xl font-semibold mb-2">No projects yet</h3>
+				<p class="text-gray-400 mb-4">Get started by creating your first Odoo project</p>
+				<button 
+					onclick="showCreateProjectModal()" 
+					class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded"
+				>
+					Create Your First Project
+				</button>
+			</div>
+		} else {
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+				for _, project := range projects {
+					@ProjectCard(project)
+				}
+			</div>
+		}
+	}
+}
+
+templ ProjectCard(project *store.Project) {
+	<div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-colors">
+		<div class="flex items-start justify-between mb-4">
+			<div>
+				<h3 class="text-xl font-semibold mb-1">{ project.Name }</h3>
+				<p class="text-gray-400 text-sm">{ project.Description }</p>
+			</div>
+			<span class={ "px-3 py-1 rounded-full text-xs font-medium", statusClass(project.Status) }>
+				{ project.Status }
+			</span>
+		</div>
+		
+		<div class="space-y-2 mb-4 text-sm">
+			<div class="flex justify-between">
+				<span class="text-gray-400">Odoo:</span>
+				<span>{ project.OdooVersion }</span>
+			</div>
+			<div class="flex justify-between">
+				<span class="text-gray-400">PostgreSQL:</span>
+				<span>{ project.PostgresVersion }</span>
+			</div>
+			<div class="flex justify-between">
+				<span class="text-gray-400">Port:</span>
+				<span>{ fmt.Sprintf("%d", project.Port) }</span>
+			</div>
+		</div>
+		
+		<div class="flex space-x-2">
+			if project.Status == "running" {
+				<button 
+					onclick={ stopProject(project.ID) }
+					class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
+				>
+					Stop
+				</button>
+				<a 
+					href={ templ.URL(fmt.Sprintf("http://localhost:%d", project.Port)) }
+					target="_blank"
+					class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm text-center"
+				>
+					Open
+				</a>
+			} else {
+				<button 
+					onclick={ startProject(project.ID) }
+					class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm"
+				>
+					Start
+				</button>
+			}
+			<button 
+				onclick={ showLogs(project.ID) }
+				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+				title="View Logs"
+			>
+				📋
+			</button>
+			<button 
+				onclick={ downloadCompose(project.ID) }
+				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
+				title="Download docker-compose.yml"
+			>
+				⬇️
+			</button>
+			<button 
+				onclick={ deleteProject(project.ID) }
+				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-red-400 rounded text-sm"
+				title="Delete Project"
+			>
+				🗑️
+			</button>
+		</div>
+	</div>
+}
+
+templ ProjectsList(projects []*store.Project) {
+	@Layout("Projects") {
+		<h2 class="text-3xl font-bold mb-6">Projects</h2>
+		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+			for _, project := range projects {
+				@ProjectCard(project)
+			}
+		</div>
+	}
+}
+
+func statusClass(status string) string {
+	switch status {
+	case "running":
+		return "bg-green-600"
+	case "stopped":
+		return "bg-gray-600"
+	case "error":
+		return "bg-red-600"
+	default:
+		return "bg-gray-600"
+	}
+}
+
+script startProject(id string) {
+	window.startProject(id);
+}
+
+script stopProject(id string) {
+	window.stopProject(id);
+}
+
+script showLogs(id string) {
+	window.showLogs(id);
+}
+
+script downloadCompose(id string) {
+	window.downloadCompose(id);
+}
+
+script deleteProject(id string) {
+	window.deleteProject(id);
+}
