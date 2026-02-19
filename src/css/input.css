@@ -3,38 +3,47 @@
 @source "../../templates/**/*.templ";
 @source "../../cmd/odoo-manager/static/js/**/*.js";
 
-@theme {
-  --animate-modal-fade-in: modal-fade-in 0.3s ease-out;
-}
-
-@keyframes modal-fade-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 @layer base {
   /* Custom scrollbar for dark theme */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
-    background-color: var(--color-gray-800);
+    background-color: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: var(--color-gray-600);
-    border-radius: 0.25rem;
+    background-color: var(--color-gray-700);
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: var(--color-gray-500);
+    background-color: var(--color-gray-600);
+  }
+
+  /* Smooth transitions for SPA navigation */
+  #main-content {
+    animation: fadeIn 0.15s ease-out;
+  }
+
+  /* Line clamp utility for descriptions */
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

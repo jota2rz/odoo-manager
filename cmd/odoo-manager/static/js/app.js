@@ -3,6 +3,7 @@
 
 let eventSource = null;
 let _appVersion = null;
+let _syncInterval = null;
 
 function connectSSE() {
   if (eventSource) eventSource.close();
@@ -21,6 +22,11 @@ function connectSSE() {
     }
     _appVersion = serverVersion;
     hideConnectionLostOverlay();
+    // Reconcile project states to heal any SSE events missed during the gap
+    syncAllProjects();
+    // Periodic self-heal: recover from any dropped SSE events
+    if (_syncInterval) clearInterval(_syncInterval);
+    _syncInterval = setInterval(syncAllProjects, 30000);
   });
 
   eventSource.addEventListener('project_created', (e) => {
@@ -41,6 +47,7 @@ function connectSSE() {
         handleEmptyState();
       }, 300);
     }
+    showNotification('Project deleted successfully', 'success');
   });
 
   eventSource.addEventListener('project_status_changed', (e) => {
@@ -70,17 +77,49 @@ function connectSSE() {
     try { status = JSON.parse(e.data).data; } catch (_) { /* plain text from initial send */ }
     if (status === 'up') {
       hideDockerDownOverlay();
+      updateDockerIndicator(true);
     } else {
       showDockerDownOverlay();
+      updateDockerIndicator(false);
     }
   });
 
   eventSource.onerror = () => {
     console.warn('SSE connection lost, reconnecting in 3s…');
     eventSource.close();
+    if (_syncInterval) { clearInterval(_syncInterval); _syncInterval = null; }
     showConnectionLostOverlay();
     setTimeout(connectSSE, 3000);
   };
+}
+
+// ── Docker status indicator in sidebar ────────────────────────────────
+
+function updateDockerIndicator(isUp) {
+  document.querySelectorAll('[data-docker-status]').forEach(el => {
+    const dot = el.querySelector('[data-docker-dot]');
+    const text = el.querySelector('[data-docker-text]');
+    if (dot) {
+      dot.className = isUp
+        ? 'flex h-2 w-2 shrink-0 rounded-full bg-green-500'
+        : 'flex h-2 w-2 shrink-0 rounded-full bg-red-500';
+    }
+    if (text) {
+      text.textContent = isUp ? 'Docker Connected' : 'Docker Disconnected';
+    }
+  });
+}
+
+// ── Mobile sidebar ────────────────────────────────────────────────────
+
+function openMobileSidebar() {
+  const sidebar = document.getElementById('mobileSidebar');
+  if (sidebar) sidebar.classList.remove('hidden');
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.getElementById('mobileSidebar');
+  if (sidebar) sidebar.classList.add('hidden');
 }
 
 // Insert or replace a project card in the grid
@@ -91,6 +130,11 @@ function upsertProjectCard(project) {
   // Remove empty-state placeholder if present
   const emptyState = grid.querySelector('[data-empty]');
   if (emptyState) emptyState.remove();
+
+  // Ensure grid has proper classes when transitioning from empty
+  if (!grid.classList.contains('grid')) {
+    grid.className = 'grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3';
+  }
 
   const existing = document.getElementById('project-' + project.id);
   const card = buildProjectCard(project);
@@ -147,69 +191,136 @@ async function syncAllProjects() {
 // Show empty state when last card is removed
 function handleEmptyState() {
   const grid = document.getElementById('projectGrid');
-  if (!grid || grid.children.length > 0) return;
+  if (!grid) return;
+  if (grid.querySelectorAll('[data-project-id]').length > 0) return;
+  if (grid.querySelector('[data-empty]')) return; // already showing empty state
+
+  // Reset grid classes for empty state
+  grid.className = '';
 
   const empty = document.createElement('div');
   empty.setAttribute('data-empty', '');
-  empty.className = 'bg-gray-800 rounded-lg p-8 text-center';
+  empty.className = 'text-center py-16';
   empty.innerHTML = `
-    <div class="mb-4 flex justify-center"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-16 text-gray-400"><path stroke-linecap="round" stroke-linejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/></svg></div>
-    <h3 class="text-xl font-semibold mb-2">No projects yet</h3>
-    <p class="text-gray-400 mb-4">Get started by creating your first Odoo project</p>
-    <button onclick="showCreateProjectModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded">
-      Create Your First Project
-    </button>
+    <svg class="mx-auto size-12 text-gray-600" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/>
+    </svg>
+    <h3 class="mt-3 text-sm font-semibold text-white">No projects</h3>
+    <p class="mt-1 text-sm text-gray-400">Get started by creating your first Odoo project.</p>
+    <div class="mt-6">
+      <button onclick="showCreateProjectModal()" class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400">
+        <svg class="-ml-0.5 size-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z"/></svg>
+        New Project
+      </button>
+    </div>
   `;
   grid.appendChild(empty);
 }
 
+// Status badge classes
+function statusBadgeClass(status) {
+  switch (status) {
+    case 'running':  return 'bg-green-400/10 text-green-400 ring-green-400/20';
+    case 'error':    return 'bg-red-400/10 text-red-400 ring-red-400/20';
+    case 'creating':
+    case 'starting':
+    case 'stopping':
+    case 'deleting': return 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/20';
+    default:         return 'bg-gray-400/10 text-gray-400 ring-gray-400/20';
+  }
+}
+
+function statusDotClass(status) {
+  switch (status) {
+    case 'running':  return 'bg-green-400';
+    case 'error':    return 'bg-red-400';
+    case 'creating':
+    case 'starting':
+    case 'stopping':
+    case 'deleting': return 'bg-yellow-400 animate-pulse';
+    default:         return 'bg-gray-400';
+  }
+}
+
 // Build a project card DOM element matching the Templ-rendered structure
 function buildProjectCard(project) {
-  const statusBg = project.status === 'running' ? 'bg-green-600'
-                  : project.status === 'error'   ? 'bg-red-600'
-                  : 'bg-gray-600';
-
+  const isTransient = ['creating', 'deleting', 'starting', 'stopping'].includes(project.status);
   const card = document.createElement('div');
   card.id = 'project-' + project.id;
   card.dataset.projectId = project.id;
   card.dataset.port = project.port;
-  card.className = 'bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-colors';
+  card.className = 'group relative overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 hover:ring-indigo-500/40 transition-all duration-200';
+
+  // For transient statuses, render the button layout that matches the base state
+  const showRunningLayout = project.status === 'running' || project.status === 'stopping';
 
   let actionButtons = '';
-  if (project.status === 'running') {
+  if (showRunningLayout) {
     actionButtons = `
       <button onclick="window.stopProject('${project.id}')"
-        class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm">Stop</button>
+        class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-400 ring-1 ring-inset ring-red-500/20 hover:bg-red-500/20 transition-colors">Stop</button>
       <a href="http://localhost:${project.port}" target="_blank"
-        class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm text-center">Open</a>
-      <button onclick="window.backupProject('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-blue-400 rounded text-sm" title="Backup Database"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg></button>
+        class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 transition-colors">Open</a>
+      <button onclick="window.backupProject('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="Backup Database"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg></button>
     `;
   } else {
     actionButtons = `
       <button onclick="window.startProject('${project.id}')"
-        class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm">Start</button>
+        class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-green-500/10 px-3 py-2 text-sm font-semibold text-green-400 ring-1 ring-inset ring-green-500/20 hover:bg-green-500/20 transition-colors">Start</button>
     `;
   }
 
   card.innerHTML = `
-    <div class="flex items-start justify-between mb-4">
-      <div>
-        <h3 class="text-xl font-semibold mb-1">${escapeHTML(project.name)}</h3>
-        <p class="text-gray-400 text-sm">${escapeHTML(project.description || '')}</p>
+    <div class="p-6">
+      <div class="flex items-start justify-between">
+        <div class="min-w-0 flex-1">
+          <h3 class="text-base font-semibold text-white truncate">${escapeHTML(project.name)}</h3>
+          <p class="mt-1 text-sm text-gray-400 line-clamp-1">${escapeHTML(project.description || '')}</p>
+        </div>
+        <span class="inline-flex items-center gap-x-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(project.status)}">
+          <span class="h-1.5 w-1.5 rounded-full ${statusDotClass(project.status)}"></span>
+          ${escapeHTML(isTransient ? project.status + '…' : project.status)}
+        </span>
       </div>
-      <span class="px-3 py-1 rounded-full text-xs font-medium ${statusBg}">${escapeHTML(project.status)}</span>
-    </div>
-    <div class="space-y-2 mb-4 text-sm">
-      <div class="flex justify-between"><span class="text-gray-400">Odoo:</span><span>${escapeHTML(project.odoo_version)}</span></div>
-      <div class="flex justify-between"><span class="text-gray-400">PostgreSQL:</span><span>${escapeHTML(project.postgres_version)}</span></div>
-      <div class="flex justify-between"><span class="text-gray-400">Port:</span><span>${project.port}</span></div>
-    </div>
-    <div class="flex space-x-2">
-      ${actionButtons}
-      <button onclick="window.showLogs('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm" title="View Logs"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg></button>
-      <button onclick="window.deleteProject('${project.id}')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-red-400 rounded text-sm" title="Delete Project"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+      <dl class="mt-5 grid grid-cols-3 gap-3 border-t border-white/5 pt-5 text-sm">
+        <div><dt class="text-gray-500 text-xs">Odoo</dt><dd class="mt-1 font-medium text-white">v${escapeHTML(project.odoo_version)}</dd></div>
+        <div><dt class="text-gray-500 text-xs">PostgreSQL</dt><dd class="mt-1 font-medium text-white">v${escapeHTML(project.postgres_version)}</dd></div>
+        <div><dt class="text-gray-500 text-xs">Port</dt><dd class="mt-1 font-medium text-white">${project.port}</dd></div>
+      </dl>
+      <div class="mt-5 flex items-center gap-2 border-t border-white/5 pt-5">
+        ${actionButtons}
+        <button onclick="window.showConfigModal('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="Edit Config"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></button>
+        <button onclick="window.showLogs('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="View Logs"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg></button>
+        <button onclick="window.deleteProject('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 transition-colors" title="Delete Project"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
+      </div>
     </div>
   `;
+
+  // Apply pending visual state for transient statuses
+  if (isTransient) {
+    const btnRow = card.querySelector('.flex.items-center.gap-2');
+    if (btnRow) {
+      const spinnerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
+
+      btnRow.querySelectorAll('button').forEach(btn => {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+      });
+      btnRow.querySelectorAll('a').forEach(link => {
+        link.removeAttribute('href');
+        link.classList.add('pointer-events-none', 'opacity-50', 'cursor-not-allowed');
+      });
+
+      let targetBtn;
+      if (project.status === 'deleting') {
+        targetBtn = btnRow.querySelector('[title="Delete Project"]');
+      } else {
+        targetBtn = btnRow.querySelector('button');
+      }
+      if (targetBtn) targetBtn.innerHTML = spinnerHTML;
+    }
+  }
+
   return card;
 }
 
@@ -227,11 +338,11 @@ function setCardPending(projectId, action) {
   // Update status badge
   const badge = card.querySelector('span.rounded-full');
   if (badge) {
-    badge.className = 'px-3 py-1 rounded-full text-xs font-medium bg-yellow-600';
-    badge.textContent = action + '…';
+    badge.className = 'inline-flex items-center gap-x-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-yellow-400/10 text-yellow-400 ring-yellow-400/20';
+    badge.innerHTML = `<span class="h-1.5 w-1.5 rounded-full bg-yellow-400 animate-pulse"></span>${escapeHTML(action)}…`;
   }
 
-  const btnRow = card.querySelector('.flex.space-x-2');
+  const btnRow = card.querySelector('.flex.items-center.gap-2');
   if (!btnRow) return;
 
   const spinnerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
@@ -239,13 +350,13 @@ function setCardPending(projectId, action) {
   // Disable all buttons
   btnRow.querySelectorAll('button').forEach(btn => {
     btn.disabled = true;
-    btn.classList.add('opacity-70', 'cursor-not-allowed');
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
   });
 
   // Disable all links (e.g. "Open")
   btnRow.querySelectorAll('a').forEach(link => {
     link.removeAttribute('href');
-    link.classList.add('pointer-events-none', 'opacity-70', 'cursor-not-allowed');
+    link.classList.add('pointer-events-none', 'opacity-50', 'cursor-not-allowed');
   });
 
   // Put the spinner on the correct button based on the action
@@ -261,6 +372,17 @@ function setCardPending(projectId, action) {
   if (targetBtn) {
     targetBtn.innerHTML = spinnerHTML;
   }
+
+  // Safety net: if the card is not rebuilt within 60s (e.g. dropped SSE
+  // event), trigger a full sync to recover from the stuck state.
+  setTimeout(() => {
+    const staleCard = document.getElementById('project-' + projectId);
+    if (!staleCard) return;
+    const row = staleCard.querySelector('.flex.items-center.gap-2');
+    if (row && row.querySelector('button[disabled]')) {
+      syncAllProjects();
+    }
+  }, 60000);
 }
 
 // Set the backup button into a pending/spinner state or restore it
@@ -271,16 +393,16 @@ function setBackupPending(projectId, pending) {
   if (!btn) return;
 
   const spinnerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
-  const iconHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>`;
+  const iconHTML = `<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>`;
 
   if (pending) {
     btn.disabled = true;
     btn.innerHTML = spinnerHTML;
-    btn.classList.add('opacity-70', 'cursor-not-allowed');
+    btn.classList.add('opacity-50', 'cursor-not-allowed');
   } else {
     btn.disabled = false;
     btn.innerHTML = iconHTML;
-    btn.classList.remove('opacity-70', 'cursor-not-allowed');
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
   }
 }
 
@@ -291,16 +413,15 @@ function showConnectionLostOverlay() {
 
   const overlay = document.createElement('div');
   overlay.id = 'connectionLostOverlay';
-  overlay.className = 'fixed inset-0 flex items-center justify-center z-[9999]';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+  overlay.className = 'fixed inset-0 flex items-center justify-center z-[9999] bg-gray-950/90 backdrop-blur-sm';
   overlay.innerHTML = `
     <div class="text-center">
-      <svg class="animate-spin h-10 w-10 text-white mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <svg class="animate-spin h-10 w-10 text-indigo-400 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
-      <h2 class="text-xl font-semibold text-white mb-1">Connection lost</h2>
-      <p class="text-gray-300 text-sm">Trying to reconnect&hellip;</p>
+      <h2 class="text-lg font-semibold text-white mb-1">Connection lost</h2>
+      <p class="text-gray-400 text-sm">Trying to reconnect&hellip;</p>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -318,16 +439,15 @@ function showDockerDownOverlay() {
 
   const overlay = document.createElement('div');
   overlay.id = 'dockerDownOverlay';
-  overlay.className = 'fixed inset-0 flex items-center justify-center z-[9998]';
-  overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+  overlay.className = 'fixed inset-0 flex items-center justify-center z-[9998] bg-gray-950/90 backdrop-blur-sm';
   overlay.innerHTML = `
     <div class="text-center">
-      <svg class="animate-spin h-10 w-10 text-white mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <svg class="animate-spin h-10 w-10 text-red-400 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
-      <h2 class="text-xl font-semibold text-white mb-1">Trying to reconnect to Docker&hellip;</h2>
-      <p class="text-gray-300 text-sm">Check if Docker is running.</p>
+      <h2 class="text-lg font-semibold text-white mb-1">Trying to reconnect to Docker&hellip;</h2>
+      <p class="text-gray-400 text-sm">Check if Docker is running.</p>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -345,12 +465,131 @@ document.addEventListener('DOMContentLoaded', () => {
   initCurrentPage();
 });
 
+// ── Confirmation modal ────────────────────────────────────────────────
+
+let _confirmResolve = null;
+
+function showConfirmModal({ title = 'Confirm Action', message = 'Are you sure?', bodyHtml = '', confirmText = 'Delete', confirmClass = '' } = {}) {
+  return new Promise((resolve) => {
+    _confirmResolve = resolve;
+    const modal = document.getElementById('confirmModal');
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    const bodyEl = document.getElementById('confirmModalBody');
+    if (bodyHtml) {
+      bodyEl.innerHTML = bodyHtml;
+      bodyEl.classList.remove('hidden');
+    } else {
+      bodyEl.innerHTML = '';
+      bodyEl.classList.add('hidden');
+    }
+    const okBtn = document.getElementById('confirmModalOk');
+    okBtn.textContent = confirmText;
+    okBtn.className = 'rounded-md px-3 py-2 text-sm font-semibold text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 ' +
+      (confirmClass || 'bg-red-500 hover:bg-red-400 focus-visible:outline-red-500');
+    modal.classList.remove('hidden');
+  });
+}
+
+function hideConfirmModal(result) {
+  const modal = document.getElementById('confirmModal');
+  modal.classList.add('hidden');
+  const bodyEl = document.getElementById('confirmModalBody');
+  bodyEl.innerHTML = '';
+  bodyEl.classList.add('hidden');
+  if (_confirmResolve) {
+    _confirmResolve(result);
+    _confirmResolve = null;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'confirmModalOk') hideConfirmModal(true);
+  if (e.target.id === 'confirmModalCancel') hideConfirmModal(false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && _confirmResolve) hideConfirmModal(false);
+  if (e.key === 'Escape' && _configProjectId) hideConfigModal();
+});
+
+// ── Config Editor Modal ────────────────────────────────────────────────
+
+let _configProjectId = null;
+
+window.showConfigModal = async function(id) {
+  _configProjectId = id;
+  const modal = document.getElementById('configModal');
+  const loading = document.getElementById('configLoading');
+  const editor = document.getElementById('configEditor');
+  const errorEl = document.getElementById('configError');
+
+  // Reset state
+  editor.classList.add('hidden');
+  editor.value = '';
+  errorEl.classList.add('hidden');
+  errorEl.textContent = '';
+  loading.classList.remove('hidden');
+  modal.classList.remove('hidden');
+
+  try {
+    const resp = await fetch(`/api/projects/${id}/config`);
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text.trim() || 'Failed to load config');
+    }
+    const data = await resp.json();
+    editor.value = data.content || '';
+    loading.classList.add('hidden');
+    editor.classList.remove('hidden');
+  } catch (err) {
+    loading.classList.add('hidden');
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  }
+};
+
+function hideConfigModal() {
+  const modal = document.getElementById('configModal');
+  modal.classList.add('hidden');
+  _configProjectId = null;
+}
+
+async function saveConfig() {
+  if (!_configProjectId) return;
+  const editor = document.getElementById('configEditor');
+  const errorEl = document.getElementById('configError');
+  const saveBtn = document.getElementById('configModalSave');
+
+  errorEl.classList.add('hidden');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+
+  try {
+    const resp = await fetch(`/api/projects/${_configProjectId}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editor.value }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(text.trim() || 'Failed to save config');
+    }
+    showNotification('Configuration saved. Restart the project for changes to take effect.', 'success');
+    hideConfigModal();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save';
+  }
+}
+
 // ── Modal management ──────────────────────────────────────────────────
 
 function showCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.remove('hidden');
-  modal.querySelector('.bg-gray-800').classList.add('animate-modal-fade-in');
   updatePgvectorHint();
 }
 
@@ -417,11 +656,11 @@ function setButtonLoading(button, loading) {
     button.disabled = true;
     button._originalHTML = button.innerHTML;
     button.innerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
-    button.classList.add('opacity-70', 'cursor-not-allowed');
+    button.classList.add('opacity-50', 'cursor-not-allowed');
   } else {
     button.disabled = false;
     button.innerHTML = button._originalHTML;
-    button.classList.remove('opacity-70', 'cursor-not-allowed');
+    button.classList.remove('opacity-50', 'cursor-not-allowed');
   }
 }
 
@@ -460,16 +699,20 @@ window.stopProject = async function(id) {
 };
 
 window.deleteProject = async function(id) {
-  if (!confirm('Are you sure you want to delete this project? This will remove all containers.')) {
-    return;
-  }
   const button = event.currentTarget;
+  const confirmed = await showConfirmModal({
+    title: 'Delete Project',
+    message: 'Are you sure you want to delete this project? This will remove all containers and cannot be undone.',
+    confirmText: 'Delete',
+  });
+  if (!confirmed) return;
   setButtonLoading(button, true);
   try {
     const response = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
     if (response.ok || response.status === 202) {
-      showNotification('Project deleted successfully', 'success');
-      removeProjectCard(id);
+      // Card removal and notification are handled by the SSE project_deleted event
+      // so all clients stay in sync. The project_action_pending SSE event
+      // already puts the card into "deleting" state with spinner.
     } else {
       const error = await response.text();
       showNotification('Failed to delete project: ' + error, 'error');
@@ -565,15 +808,20 @@ window.backupProject = async function(id) {
 
   // ── Step 2: Show database selection modal ───────────────────────────
   const picker = document.createElement('div');
-  picker.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+  picker.className = 'fixed inset-0 z-50';
   picker.innerHTML = `
-    <div class="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Select Database</h2>
-        <button id="dbPickerClose" class="text-gray-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="relative w-full max-w-md overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-semibold text-white">Select Database</h2>
+            <button id="dbPickerClose" class="rounded-md p-1 text-gray-400 hover:text-white hover:bg-white/10"><svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          </div>
+          <p class="text-sm text-gray-400 mb-4">Choose a database to back up:</p>
+          <div id="dbList" class="space-y-2"></div>
+        </div>
       </div>
-      <p class="text-gray-400 text-sm mb-4">Choose a database to back up:</p>
-      <div id="dbList" class="space-y-2"></div>
     </div>
   `;
   document.body.appendChild(picker);
@@ -581,10 +829,10 @@ window.backupProject = async function(id) {
   const dbList = document.getElementById('dbList');
   databases.forEach(db => {
     const btn = document.createElement('button');
-    btn.className = 'w-full text-left px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded text-sm flex items-center justify-between group';
+    btn.className = 'w-full text-left px-4 py-3 rounded-lg bg-white/5 ring-1 ring-white/10 hover:bg-white/10 text-sm flex items-center justify-between group transition-colors';
     btn.innerHTML = `
-      <span class="font-medium">${escapeHTML(db)}</span>
-      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4 text-gray-400 group-hover:text-white"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+      <span class="font-medium text-white">${escapeHTML(db)}</span>
+      <svg class="size-4 text-gray-500 group-hover:text-white" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
     `;
     btn.addEventListener('click', () => {
       picker.remove();
@@ -602,14 +850,19 @@ window.backupProject = async function(id) {
 
 function startBackup(id, dbName) {
   const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+  modal.className = 'fixed inset-0 z-50';
   modal.innerHTML = `
-    <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh]">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Backup: ${escapeHTML(dbName)}</h2>
-        <button id="backupModalClose" class="text-gray-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="relative w-full max-w-4xl overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl">
+          <div class="flex justify-between items-center px-6 py-4 border-b border-white/5">
+            <h2 class="text-lg font-semibold text-white">Backup: ${escapeHTML(dbName)}</h2>
+            <button id="backupModalClose" class="rounded-md p-1 text-gray-400 hover:text-white hover:bg-white/10"><svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+          </div>
+          <div id="backupLogViewer" class="p-4 max-h-[500px] overflow-y-auto font-mono text-sm leading-relaxed"></div>
+        </div>
       </div>
-      <div id="backupLogViewer" class="bg-slate-950 border border-slate-700 rounded-lg p-4 max-h-[500px] overflow-y-auto font-mono text-sm leading-relaxed"></div>
     </div>
   `;
 
@@ -678,20 +931,25 @@ function startBackup(id, dbName) {
 
 window.showLogs = function(id) {
   const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+  modal.className = 'fixed inset-0 z-50';
   modal.innerHTML = `
-    <div class="bg-gray-800 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh]">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-bold">Project Logs</h2>
-        <div class="flex space-x-2">
-          <select id="containerSelect" class="px-3 py-1 bg-gray-700 border border-gray-600 rounded text-sm">
-            <option value="odoo">Odoo</option>
-            <option value="postgres">PostgreSQL</option>
-          </select>
-          <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+    <div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="relative w-full max-w-4xl overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl">
+          <div class="flex justify-between items-center px-6 py-4 border-b border-white/5">
+            <h2 class="text-lg font-semibold text-white">Project Logs</h2>
+            <div class="flex items-center gap-3">
+              <select id="containerSelect" class="rounded-md bg-white/5 px-3 py-1.5 text-sm text-white outline-1 -outline-offset-1 outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 *:bg-gray-900">
+                <option value="odoo">Odoo</option>
+                <option value="postgres">PostgreSQL</option>
+              </select>
+              <button id="logsCloseBtn" class="rounded-md p-1 text-gray-400 hover:text-white hover:bg-white/10"><svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg></button>
+            </div>
+          </div>
+          <div id="logViewer" class="p-4 max-h-[500px] overflow-y-auto font-mono text-sm leading-relaxed"></div>
         </div>
       </div>
-      <div id="logViewer" class="bg-slate-950 border border-slate-700 rounded-lg p-4 max-h-[500px] overflow-y-auto font-mono text-sm leading-relaxed"></div>
     </div>
   `;
 
@@ -703,7 +961,7 @@ window.showLogs = function(id) {
 
   function connectLogs() {
     if (logSource) logSource.close();
-    logViewer.innerHTML = '<div class="text-gray-400">Loading logs...</div>';
+    logViewer.innerHTML = '<div class="text-gray-500">Loading logs...</div>';
 
     const container = containerSelect.value;
     logSource = new EventSource(`/api/projects/${id}/logs?container=${container}`);
@@ -721,7 +979,7 @@ window.showLogs = function(id) {
     logSource.onerror = function() {
       logSource.close();
       const endLine = document.createElement('div');
-      endLine.className = 'text-slate-200 py-0.5 text-gray-500';
+      endLine.className = 'text-gray-500 py-0.5';
       endLine.textContent = '— End of logs —';
       logViewer.appendChild(endLine);
     };
@@ -730,20 +988,29 @@ window.showLogs = function(id) {
   containerSelect.addEventListener('change', connectLogs);
   connectLogs();
 
-  modal.querySelector('button').addEventListener('click', () => {
+  function closeModal() {
     if (logSource) logSource.close();
+    modal.remove();
+  }
+
+  document.getElementById('logsCloseBtn').addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e) {
+    // Only close if clicking the backdrop area
+    if (e.target.classList.contains('backdrop-blur-sm')) closeModal();
   });
 };
 
 // ── Notifications ─────────────────────────────────────────────────────
 
 function showNotification(message, type = 'info') {
+  const colors = {
+    success: 'bg-green-500/90 ring-green-500/20',
+    error:   'bg-red-500/90 ring-red-500/20',
+    info:    'bg-indigo-500/90 ring-indigo-500/20',
+  };
+
   const notification = document.createElement('div');
-  notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 text-white ${
-    type === 'success' ? 'bg-green-600' :
-    type === 'error'   ? 'bg-red-600'   :
-    'bg-blue-600'
-  }`;
+  notification.className = `fixed top-20 right-6 z-[60] px-4 py-3 rounded-lg shadow-xl ring-1 text-sm font-medium text-white backdrop-blur-sm ${colors[type] || colors.info}`;
   notification.textContent = message;
   document.body.appendChild(notification);
 
@@ -772,9 +1039,24 @@ function navigate(url, pushState = true) {
     .then(r => r.text())
     .then(html => {
       const main = document.getElementById('main-content');
-      if (main) main.innerHTML = html;
+      if (main) {
+        const content = main.querySelector('div');
+        if (content) {
+          content.innerHTML = html;
+        } else {
+          main.innerHTML = `<div class="px-4 sm:px-6 lg:px-8">${html}</div>`;
+        }
+        // Script tags inserted via innerHTML are inert — re-create them
+        // so the browser executes them (needed for templ onclick helpers).
+        main.querySelectorAll('script').forEach(old => {
+          const s = document.createElement('script');
+          s.textContent = old.textContent;
+          old.replaceWith(s);
+        });
+      }
       if (pushState) history.pushState({}, '', url);
       updateActiveNav(url);
+      closeMobileSidebar();
       initCurrentPage();
     })
     .catch(err => {
@@ -784,11 +1066,18 @@ function navigate(url, pushState = true) {
 }
 
 function updateActiveNav(url) {
-  document.querySelectorAll('[data-spa-link]').forEach(link => {
-    const isActive = link.getAttribute('href') === url;
-    link.classList.toggle('text-white', isActive);
-    link.classList.toggle('font-semibold', isActive);
-    link.classList.toggle('text-gray-300', !isActive);
+  document.querySelectorAll('[data-nav-link]').forEach(link => {
+    const href = link.getAttribute('href');
+    const isActive = href === url;
+
+    // Remove all state classes
+    link.classList.remove('bg-gray-800', 'text-white', 'text-gray-400');
+
+    if (isActive) {
+      link.classList.add('bg-gray-800', 'text-white');
+    } else {
+      link.classList.add('text-gray-400');
+    }
   });
 }
 
@@ -796,6 +1085,9 @@ function initCurrentPage() {
   const path = location.pathname;
   if (path === '/audit') {
     _pageCleanup = initAuditPage();
+  }
+  if (path === '/maintenance') {
+    initMaintenancePage();
   }
 }
 
@@ -812,7 +1104,12 @@ document.addEventListener('click', (e) => {
   }
   // Close modal on backdrop click
   const modal = document.getElementById('createProjectModal');
-  if (e.target === modal) hideCreateProjectModal();
+  if (modal && !modal.classList.contains('hidden')) {
+    // Check if click was on the backdrop (the semi-transparent overlay)
+    if (e.target.classList.contains('backdrop-blur-sm')) {
+      hideCreateProjectModal();
+    }
+  }
 });
 
 // Handle browser back/forward
@@ -942,8 +1239,138 @@ function initAuditPage() {
   };
 }
 
+// ── Maintenance Page ──────────────────────────────────────────────────
+
+const CLEAN_LABELS = {
+  containers: { singular: 'container', plural: 'containers', title: 'Clean Orphaned Containers' },
+  volumes:    { singular: 'volume',    plural: 'volumes',    title: 'Clean Orphaned Volumes' },
+  images:     { singular: 'image',     plural: 'images',     title: 'Clean Orphaned Images' },
+};
+
+function initMaintenancePage() {
+  // Nothing to initialise — the page is static; `cleanOrphaned` is global.
+}
+
+window.cleanOrphaned = async function(kind) {
+  const labels = CLEAN_LABELS[kind];
+  if (!labels) return;
+
+  const btn = document.getElementById(`clean${capitalize(kind)}Btn`);
+
+  // ── Step 1: Fetch preview of orphaned resources ─────────────────────
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="inline size-4 animate-spin mr-2 -ml-0.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>Scanning…`;
+  }
+
+  let items = [];
+  try {
+    const previewResp = await fetch(`/api/maintenance/preview-${kind}`);
+    if (!previewResp.ok) {
+      showNotification(`Failed to scan ${labels.plural}: ${await previewResp.text()}`, 'error');
+      return;
+    }
+    const previewData = await previewResp.json();
+    items = previewData.items || [];
+  } catch (err) {
+    showNotification(`Error scanning ${labels.plural}: ${err.message}`, 'error');
+    return;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = labels.title;
+    }
+  }
+
+  if (items.length === 0) {
+    showNotification(`No orphaned ${labels.plural} found`, 'success');
+    return;
+  }
+
+  // ── Step 2: Build preview list HTML for the confirmation modal ──────
+  let bodyHtml = `<div class="rounded-lg bg-white/5 ring-1 ring-white/10 p-3 max-h-48 overflow-y-auto"><p class="text-xs font-medium text-gray-300 mb-2">${items.length} ${items.length === 1 ? labels.singular : labels.plural} will be removed:</p><ul class="space-y-1">`;
+  items.forEach(name => {
+    bodyHtml += `<li class="text-xs text-gray-400 truncate font-mono" title="${escapeHTML(name)}">${escapeHTML(name)}</li>`;
+  });
+  bodyHtml += '</ul></div>';
+
+  // ── Step 3: Show confirmation modal with resource list ──────────────
+  const confirmed = await showConfirmModal({
+    title: labels.title,
+    message: `This will permanently remove all Docker ${labels.plural} listed below. Resources from other applications or manual Docker usage will be lost.`,
+    bodyHtml,
+    confirmText: `Remove ${items.length} ${items.length === 1 ? labels.singular : labels.plural}`,
+    confirmClass: 'bg-red-500 hover:bg-red-400 focus-visible:outline-red-500',
+  });
+  if (!confirmed) return;
+
+  // ── Step 4: Execute cleanup ─────────────────────────────────────────
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="inline size-4 animate-spin mr-2 -ml-0.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>Cleaning…`;
+  }
+
+  try {
+    const resp = await fetch(`/api/maintenance/clean-${kind}`, { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.text();
+      showNotification(`Failed to clean ${labels.plural}: ${err}`, 'error');
+      return;
+    }
+    const data = await resp.json();
+    const removedCount = (data.removed || []).length;
+    const errorCount = (data.errors || []).length;
+
+    // Build result HTML for modal body
+    let resultHtml = '';
+    if (removedCount > 0) {
+      resultHtml += `<div class="rounded-lg bg-green-500/10 ring-1 ring-green-500/20 p-3 mb-2"><p class="text-xs font-medium text-green-400">Removed ${removedCount} ${removedCount === 1 ? labels.singular : labels.plural}</p><ul class="mt-1.5 space-y-0.5">`;
+      (data.removed || []).forEach(name => {
+        resultHtml += `<li class="text-xs text-green-400/70 truncate font-mono" title="${escapeHTML(name)}">${escapeHTML(name)}</li>`;
+      });
+      resultHtml += '</ul></div>';
+    }
+    if (errorCount > 0) {
+      resultHtml += `<div class="rounded-lg bg-red-500/10 ring-1 ring-red-500/20 p-3"><p class="text-xs font-medium text-red-400">${errorCount} ${errorCount === 1 ? 'error' : 'errors'}</p><ul class="mt-1.5 space-y-0.5">`;
+      (data.errors || []).forEach(msg => {
+        resultHtml += `<li class="text-xs text-red-400/70 truncate font-mono" title="${escapeHTML(msg)}">${escapeHTML(msg)}</li>`;
+      });
+      resultHtml += '</ul></div>';
+    }
+    if (removedCount === 0 && errorCount === 0) {
+      resultHtml = `<div class="rounded-lg bg-gray-500/10 ring-1 ring-white/5 p-3"><p class="text-xs text-gray-400">No orphaned ${labels.plural} found.</p></div>`;
+    }
+
+    // Show results in a dismissable modal
+    const resultBody = `<div class="max-h-64 overflow-y-auto">${resultHtml}</div>`;
+    await showConfirmModal({
+      title: 'Cleanup Complete',
+      message: removedCount > 0
+        ? `Successfully cleaned ${removedCount} orphaned ${removedCount === 1 ? labels.singular : labels.plural}.`
+        : `No orphaned ${labels.plural} were removed.`,
+      bodyHtml: resultBody,
+      confirmText: 'Done',
+      confirmClass: 'bg-indigo-500 hover:bg-indigo-400 focus-visible:outline-indigo-500',
+    });
+  } catch (err) {
+    showNotification(`Error cleaning ${labels.plural}: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = labels.title;
+    }
+  }
+};
+
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // ── Keyboard handler ──────────────────────────────────────────────────
 
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') hideCreateProjectModal();
+  if (event.key === 'Escape') {
+    hideCreateProjectModal();
+    closeMobileSidebar();
+  }
 });

@@ -67,6 +67,18 @@ func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHu
 	}
 }
 
+// knownProjectIDs returns a set of project IDs currently in the database.
+// Used by maintenance cleanup functions to distinguish owned vs orphaned
+// Docker resources.
+func (h *Handler) knownProjectIDs() map[string]bool {
+	projects := h.store.List()
+	ids := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		ids[p.ID] = true
+	}
+	return ids
+}
+
 // IsDockerUp returns the last known Docker daemon reachability.
 func (h *Handler) IsDockerUp() bool {
 	h.dockerMu.RLock()
@@ -165,6 +177,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", h.handleIndex)
 	mux.HandleFunc("/projects", h.handleProjects)
 	mux.HandleFunc("/audit", h.handleAuditPage)
+	mux.HandleFunc("/maintenance", h.handleMaintenancePage)
 
 	// API endpoints
 	mux.HandleFunc("/api/projects", h.withAudit(h.handleAPIProjects))
@@ -174,7 +187,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/projects/{id}/logs", h.withAudit(h.handleProjectLogs))
 	mux.HandleFunc("/api/projects/{id}/databases", h.withAudit(h.handleListDatabases))
 	mux.HandleFunc("/api/projects/{id}/backup", h.withAudit(h.handleBackupProject))
+	mux.HandleFunc("/api/projects/{id}/config", h.withAudit(h.handleProjectConfig))
 	mux.HandleFunc("/api/backup/download/", h.withAudit(h.handleBackupDownload))
+
+	// Maintenance endpoints
+	mux.HandleFunc("/api/maintenance/preview-containers", h.handlePreviewOrphaned("containers"))
+	mux.HandleFunc("/api/maintenance/preview-volumes", h.handlePreviewOrphaned("volumes"))
+	mux.HandleFunc("/api/maintenance/preview-images", h.handlePreviewOrphaned("images"))
+	mux.HandleFunc("/api/maintenance/clean-containers", h.withAudit(h.handleCleanContainers))
+	mux.HandleFunc("/api/maintenance/clean-volumes", h.withAudit(h.handleCleanVolumes))
+	mux.HandleFunc("/api/maintenance/clean-images", h.withAudit(h.handleCleanImages))
 
 	// Audit endpoints
 	mux.HandleFunc("/api/audit/logs", h.handleAuditLogs)
@@ -185,10 +207,22 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 // withAudit wraps an HTTP handler to log each request to the audit log.
+// When the path targets a specific project it includes the project name for
+// human readability, e.g. "POST /api/projects/abc/start (My Project)".
 func (h *Handler) withAudit(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.audit != nil {
-			h.audit.Log(r, fmt.Sprintf("%s %s", r.Method, r.URL.Path))
+			msg := fmt.Sprintf("%s %s", r.Method, r.URL.Path)
+
+			// Try to resolve project name from URL path
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			if len(parts) >= 3 && parts[0] == "api" && parts[1] == "projects" {
+				if project, ok := h.store.Get(parts[2]); ok {
+					msg += fmt.Sprintf(" (%s)", project.Name)
+				}
+			}
+
+			h.audit.Log(r, msg)
 		}
 		next(w, r)
 	}
@@ -229,6 +263,20 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 // handleProjects serves the projects page
 func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
 	projects := h.store.List()
+
+	// Reconcile project statuses with actual Docker state
+	for _, project := range projects {
+		if h.dockerManager != nil {
+			reconciled := h.dockerManager.ReconcileStatus(r.Context(), project)
+			if reconciled != project.Status {
+				project.Status = reconciled
+				if err := h.store.Update(project); err != nil {
+					log.Printf("Warning: Failed to reconcile status for project %s: %v", project.ID, err)
+				}
+			}
+		}
+	}
+
 	component := templates.ProjectsList(projects)
 	component.Render(r.Context(), w)
 }
@@ -844,6 +892,57 @@ func (h *Handler) handleBackupDownload(w http.ResponseWriter, r *http.Request) {
 	go os.Remove(filePath)
 }
 
+// handleProjectConfig reads or writes odoo.conf for a project.
+// GET  → returns { "content": "<odoo.conf text>" }
+// PUT  → accepts { "content": "<new odoo.conf text>" } and writes it
+func (h *Handler) handleProjectConfig(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+	id := parts[2]
+
+	if _, ok := h.store.Get(id); !ok {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		content, err := h.dockerManager.ReadOdooConfig(r.Context(), id)
+		if err != nil {
+			http.Error(w, "Failed to read odoo.conf: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"content": content})
+
+	case http.MethodPut:
+		var body struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := h.dockerManager.WriteOdooConfig(r.Context(), id, body.Content); err != nil {
+			http.Error(w, "Failed to write odoo.conf: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // handleProjectLogs streams logs via SSE
 func (h *Handler) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 	// Extract ID and container type from query
@@ -989,6 +1088,107 @@ func (h *Handler) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 
 	component := templates.Audit()
 	component.Render(r.Context(), w)
+}
+
+// handleMaintenancePage serves the maintenance page.
+func (h *Handler) handleMaintenancePage(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Spa") == "1" {
+		templates.MaintenanceContent().Render(r.Context(), w)
+		return
+	}
+	component := templates.Maintenance()
+	component.Render(r.Context(), w)
+}
+
+// handlePreviewOrphaned returns a JSON list of orphaned resource names without deleting.
+func (h *Handler) handlePreviewOrphaned(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if h.dockerManager == nil {
+			http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+			return
+		}
+		knownIDs := h.knownProjectIDs()
+		var names []string
+		var err error
+		switch kind {
+		case "containers":
+			names, err = h.dockerManager.ListOrphanedContainers(r.Context(), knownIDs)
+		case "volumes":
+			names, err = h.dockerManager.ListOrphanedVolumes(r.Context(), knownIDs)
+		case "images":
+			names, err = h.dockerManager.ListOrphanedImages(r.Context(), knownIDs)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if names == nil {
+			names = []string{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"items": names})
+	}
+}
+
+// handleCleanContainers removes all orphaned Docker containers.
+func (h *Handler) handleCleanContainers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := h.dockerManager.CleanOrphanedContainers(r.Context(), h.knownProjectIDs())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// handleCleanVolumes removes all orphaned Docker volumes.
+func (h *Handler) handleCleanVolumes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := h.dockerManager.CleanOrphanedVolumes(r.Context(), h.knownProjectIDs())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// handleCleanImages removes all orphaned Docker images.
+func (h *Handler) handleCleanImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+	result, err := h.dockerManager.CleanOrphanedImages(r.Context(), h.knownProjectIDs())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
 }
 
 // handleAuditLogs returns the last N lines of the audit log as a JSON array

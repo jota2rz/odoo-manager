@@ -2,6 +2,7 @@ package docker
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -11,7 +12,9 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 	"github.com/jota2rz/odoo-manager/internal/store"
@@ -102,12 +105,16 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 		Tty:    true, // enable TTY so Odoo outputs ANSI colors in logs
 		Labels: projectLabels(project.ID, "odoo"),
 	}
+	configVolumeName := fmt.Sprintf("odoo-config-%s", project.ID)
 	odooHostConfig := &container.HostConfig{
 		Links: []string{fmt.Sprintf("%s:postgres", postgresContainerName)},
 		PortBindings: nat.PortMap{
 			"8069/tcp": []nat.PortBinding{
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
 			},
+		},
+		Binds: []string{
+			fmt.Sprintf("%s:/etc/odoo", configVolumeName),
 		},
 	}
 
@@ -118,9 +125,49 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 		if _, err := m.cli.ContainerCreate(ctx, odooConfig, odooHostConfig, nil, nil, odooContainerName); err != nil {
 			return fmt.Errorf("failed to create odoo container: %w", err)
 		}
+		// Seed the config volume with the default odoo.conf from the image.
+		if err := m.seedOdooConfig(ctx, odooContainerName); err != nil {
+			// Non-fatal: the container will still start with defaults.
+			fmt.Printf("Warning: failed to seed odoo.conf for %s: %v\n", project.ID, err)
+		}
 	}
 
 	return nil
+}
+
+// seedOdooConfig copies the default /etc/odoo/odoo.conf from the Odoo image
+// into the config volume. It starts the container briefly to populate the
+// volume, copies the default config out, then stops the container.
+func (m *Manager) seedOdooConfig(ctx context.Context, containerName string) error {
+	// Start the container briefly so the entrypoint writes the default config
+	if err := m.cli.ContainerStart(ctx, containerName, container.StartOptions{}); err != nil {
+		return fmt.Errorf("failed to start container for seeding: %w", err)
+	}
+
+	// The entrypoint may need a moment to write /etc/odoo/odoo.conf
+	// We'll just check if the file exists; if not, write a sensible default.
+	_, _, err := m.cli.CopyFromContainer(ctx, containerName, "/etc/odoo/odoo.conf")
+	if err != nil {
+		// File doesn't exist yet — write a minimal default
+		defaultConf := defaultOdooConf()
+		if werr := m.writeFileToContainer(ctx, containerName, "/etc/odoo/odoo.conf", []byte(defaultConf)); werr != nil {
+			return fmt.Errorf("failed to write default config: %w", werr)
+		}
+	}
+
+	// Stop the container — CreateProject should leave containers stopped
+	timeout := 10
+	_ = m.cli.ContainerStop(ctx, containerName, container.StopOptions{Timeout: &timeout})
+
+	return nil
+}
+
+// defaultOdooConf returns a minimal default odoo.conf.
+func defaultOdooConf() string {
+	return `[options]
+addons_path = /mnt/extra-addons
+data_dir = /var/lib/odoo
+`
 }
 
 // StartProject starts Odoo and Postgres containers for a project
@@ -175,12 +222,16 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 		Labels: projectLabels(project.ID, "odoo"),
 	}
 
+	configVolumeName := fmt.Sprintf("odoo-config-%s", project.ID)
 	odooHostConfig := &container.HostConfig{
 		Links: []string{fmt.Sprintf("%s:postgres", postgresContainerName)},
 		PortBindings: nat.PortMap{
 			"8069/tcp": []nat.PortBinding{
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
 			},
+		},
+		Binds: []string{
+			fmt.Sprintf("%s:/etc/odoo", configVolumeName),
 		},
 	}
 
@@ -212,22 +263,26 @@ func (m *Manager) StopProject(ctx context.Context, project *store.Project) error
 	odooContainerName := fmt.Sprintf("odoo-%s", project.ID)
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 
+	var firstErr error
+
 	// Stop Odoo container
 	timeout := 30
 	if err := m.cli.ContainerStop(ctx, odooContainerName, container.StopOptions{Timeout: &timeout}); err != nil {
 		if !client.IsErrNotFound(err) {
-			return fmt.Errorf("failed to stop odoo container: %w", err)
+			firstErr = fmt.Errorf("failed to stop odoo container: %w", err)
 		}
 	}
 
-	// Stop Postgres container
+	// Always attempt to stop Postgres even if Odoo stop failed
 	if err := m.cli.ContainerStop(ctx, postgresContainerName, container.StopOptions{Timeout: &timeout}); err != nil {
 		if !client.IsErrNotFound(err) {
-			return fmt.Errorf("failed to stop postgres container: %w", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to stop postgres container: %w", err)
+			}
 		}
 	}
 
-	return nil
+	return firstErr
 }
 
 // GetLogs streams logs from a container. The returned boolean indicates
@@ -278,8 +333,15 @@ func (m *Manager) GetProjectStatus(ctx context.Context, projectID string) (strin
 }
 
 // ReconcileStatus checks the actual Docker state and returns the real status,
-// correcting any stale status stored in the project.
+// correcting any stale status stored in the project. Transient statuses like
+// "creating" are preserved as-is because containers may not exist yet.
 func (m *Manager) ReconcileStatus(ctx context.Context, project *store.Project) string {
+	// Don't overwrite transient statuses — the async goroutine will
+	// broadcast the real status once the operation completes.
+	switch project.Status {
+	case "creating", "deleting", "starting", "stopping":
+		return project.Status
+	}
 	status, err := m.GetProjectStatus(ctx, project.ID)
 	if err != nil {
 		return "error"
@@ -292,26 +354,234 @@ func (m *Manager) RemoveProject(ctx context.Context, project *store.Project) err
 	odooContainerName := fmt.Sprintf("odoo-%s", project.ID)
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 
-	// Stop containers first
-	if err := m.StopProject(ctx, project); err != nil {
-		return err
-	}
+	// Best-effort stop — don't bail out early so removal can proceed
+	_ = m.StopProject(ctx, project)
+
+	var firstErr error
 
 	// Remove Odoo container
 	if err := m.cli.ContainerRemove(ctx, odooContainerName, container.RemoveOptions{Force: true}); err != nil {
 		if !client.IsErrNotFound(err) {
-			return fmt.Errorf("failed to remove odoo container: %w", err)
+			firstErr = fmt.Errorf("failed to remove odoo container: %w", err)
 		}
 	}
 
-	// Remove Postgres container
+	// Always attempt to remove Postgres even if Odoo remove failed
 	if err := m.cli.ContainerRemove(ctx, postgresContainerName, container.RemoveOptions{Force: true}); err != nil {
 		if !client.IsErrNotFound(err) {
-			return fmt.Errorf("failed to remove postgres container: %w", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to remove postgres container: %w", err)
+			}
 		}
 	}
 
-	return nil
+	return firstErr
+}
+
+// CleanupResult holds the outcome of a cleanup operation.
+type CleanupResult struct {
+	Removed []string `json:"removed"`
+	Errors  []string `json:"errors"`
+}
+
+// newCleanupResult returns a CleanupResult with non-nil slices so JSON
+// serialisation always produces [] instead of null.
+func newCleanupResult() *CleanupResult {
+	return &CleanupResult{Removed: []string{}, Errors: []string{}}
+}
+
+// isOwnedContainer reports whether the container belongs to a project that
+// still exists in the store.  A container is considered owned when it carries
+// the odoo-manager labels AND its project-id is present in knownProjectIDs.
+func isOwnedContainer(c container.Summary, knownProjectIDs map[string]bool) bool {
+	if c.Labels["odoo-manager.managed"] != "true" {
+		return false
+	}
+	return knownProjectIDs[c.Labels["odoo-manager.project-id"]]
+}
+
+// containerDisplayName returns a human-readable name for a container.
+func containerDisplayName(c container.Summary) string {
+	if len(c.Names) > 0 {
+		return strings.TrimPrefix(c.Names[0], "/")
+	}
+	return c.ID[:12]
+}
+
+// ListOrphanedContainers returns the names of containers whose project no
+// longer exists in the store (read-only preview).
+// knownProjectIDs must contain every project ID from the database.
+func (m *Manager) ListOrphanedContainers(ctx context.Context, knownProjectIDs map[string]bool) ([]string, error) {
+	all, err := m.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	var names []string
+	for _, c := range all {
+		if isOwnedContainer(c, knownProjectIDs) {
+			continue
+		}
+		names = append(names, containerDisplayName(c))
+	}
+	return names, nil
+}
+
+// CleanOrphanedContainers removes all Docker containers whose project no
+// longer exists in the store.
+// knownProjectIDs must contain every project ID from the database.
+func (m *Manager) CleanOrphanedContainers(ctx context.Context, knownProjectIDs map[string]bool) (*CleanupResult, error) {
+	all, err := m.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	result := newCleanupResult()
+	for _, c := range all {
+		if isOwnedContainer(c, knownProjectIDs) {
+			continue
+		}
+		name := containerDisplayName(c)
+		if err := m.cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", name, err))
+		} else {
+			result.Removed = append(result.Removed, name)
+		}
+	}
+	return result, nil
+}
+
+// ownedVolumes returns the set of volume names mounted by containers whose
+// project still exists in the store.
+func (m *Manager) ownedVolumes(ctx context.Context, knownProjectIDs map[string]bool) map[string]bool {
+	vols := map[string]bool{}
+	all, _ := m.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", "odoo-manager.managed=true")),
+	})
+	for _, c := range all {
+		if !isOwnedContainer(c, knownProjectIDs) {
+			continue
+		}
+		info, err := m.cli.ContainerInspect(ctx, c.ID)
+		if err != nil {
+			continue
+		}
+		for _, mount := range info.Mounts {
+			if mount.Name != "" {
+				vols[mount.Name] = true
+			}
+		}
+	}
+	return vols
+}
+
+// ListOrphanedVolumes returns the names of volumes not used by any container
+// whose project still exists in the store (read-only preview).
+func (m *Manager) ListOrphanedVolumes(ctx context.Context, knownProjectIDs map[string]bool) ([]string, error) {
+	owned := m.ownedVolumes(ctx, knownProjectIDs)
+	volumes, err := m.cli.VolumeList(ctx, volume.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list volumes: %w", err)
+	}
+	var names []string
+	for _, v := range volumes.Volumes {
+		if !owned[v.Name] {
+			names = append(names, v.Name)
+		}
+	}
+	return names, nil
+}
+
+// CleanOrphanedVolumes removes all Docker volumes that are NOT used by any
+// container whose project still exists in the store.
+func (m *Manager) CleanOrphanedVolumes(ctx context.Context, knownProjectIDs map[string]bool) (*CleanupResult, error) {
+	owned := m.ownedVolumes(ctx, knownProjectIDs)
+
+	volumes, err := m.cli.VolumeList(ctx, volume.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list volumes: %w", err)
+	}
+
+	result := newCleanupResult()
+	for _, v := range volumes.Volumes {
+		if owned[v.Name] {
+			continue
+		}
+		if err := m.cli.VolumeRemove(ctx, v.Name, true); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", v.Name, err))
+		} else {
+			result.Removed = append(result.Removed, v.Name)
+		}
+	}
+	return result, nil
+}
+
+// ownedImageIDs returns the set of image IDs used by containers whose
+// project still exists in the store.
+func (m *Manager) ownedImageIDs(ctx context.Context, knownProjectIDs map[string]bool) map[string]bool {
+	ids := map[string]bool{}
+	all, _ := m.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", "odoo-manager.managed=true")),
+	})
+	for _, c := range all {
+		if isOwnedContainer(c, knownProjectIDs) {
+			ids[c.ImageID] = true
+		}
+	}
+	return ids
+}
+
+// imageDisplayName returns a human-readable tag or truncated ID for an image.
+func imageDisplayName(img image.Summary) string {
+	if len(img.RepoTags) > 0 {
+		return img.RepoTags[0]
+	}
+	return img.ID[:19]
+}
+
+// ListOrphanedImages returns the tags/IDs of images not used by any container
+// whose project still exists in the store (read-only preview).
+func (m *Manager) ListOrphanedImages(ctx context.Context, knownProjectIDs map[string]bool) ([]string, error) {
+	used := m.ownedImageIDs(ctx, knownProjectIDs)
+	images, err := m.cli.ImageList(ctx, image.ListOptions{All: false})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+	var names []string
+	for _, img := range images {
+		if used[img.ID] {
+			continue
+		}
+		names = append(names, imageDisplayName(img))
+	}
+	return names, nil
+}
+
+// CleanOrphanedImages removes all Docker images that are NOT used by any
+// container whose project still exists in the store.
+func (m *Manager) CleanOrphanedImages(ctx context.Context, knownProjectIDs map[string]bool) (*CleanupResult, error) {
+	used := m.ownedImageIDs(ctx, knownProjectIDs)
+
+	images, err := m.cli.ImageList(ctx, image.ListOptions{All: false})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+
+	result := newCleanupResult()
+	for _, img := range images {
+		if used[img.ID] {
+			continue
+		}
+		tag := imageDisplayName(img)
+		_, err := m.cli.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true, PruneChildren: true})
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", tag, err))
+		} else {
+			result.Removed = append(result.Removed, tag)
+		}
+	}
+	return result, nil
 }
 
 // containerExists checks if a container exists
@@ -435,6 +705,59 @@ func (m *Manager) WaitExec(ctx context.Context, execID string) (int, error) {
 		default:
 		}
 	}
+}
+
+// ReadOdooConfig reads /etc/odoo/odoo.conf from the Odoo container.
+// Works whether the container is running or stopped.
+func (m *Manager) ReadOdooConfig(ctx context.Context, projectID string) (string, error) {
+	containerName := fmt.Sprintf("odoo-%s", projectID)
+	rc, _, err := m.cli.CopyFromContainer(ctx, containerName, "/etc/odoo/odoo.conf")
+	if err != nil {
+		return "", fmt.Errorf("failed to read odoo.conf: %w", err)
+	}
+	defer rc.Close()
+
+	tr := tar.NewReader(rc)
+	if _, err := tr.Next(); err != nil {
+		return "", fmt.Errorf("failed to read tar header: %w", err)
+	}
+	data, err := io.ReadAll(tr)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file contents: %w", err)
+	}
+	return string(data), nil
+}
+
+// WriteOdooConfig writes content to /etc/odoo/odoo.conf inside the Odoo container.
+func (m *Manager) WriteOdooConfig(ctx context.Context, projectID string, content string) error {
+	containerName := fmt.Sprintf("odoo-%s", projectID)
+	return m.writeFileToContainer(ctx, containerName, "/etc/odoo/odoo.conf", []byte(content))
+}
+
+// writeFileToContainer writes data into a file inside a container using the
+// Docker copy-to-container API (tar archive).
+func (m *Manager) writeFileToContainer(ctx context.Context, containerName, filePath string, data []byte) error {
+	dir := filepath.Dir(filePath)
+	base := filepath.Base(filePath)
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name: base,
+		Mode: 0644,
+		Size: int64(len(data)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if _, err := tw.Write(data); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+
+	return m.cli.CopyToContainer(ctx, containerName, dir, &buf, container.CopyToContainerOptions{})
 }
 
 // CopyBackupFromContainer copies /tmp/odoo_backup.zip out of the Odoo

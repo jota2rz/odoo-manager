@@ -5,152 +5,318 @@ import (
 	"github.com/jota2rz/odoo-manager/internal/store"
 )
 
+// Shared sidebar navigation content used in both mobile and desktop sidebars.
+templ sidebarContent() {
+	<div class="flex h-16 shrink-0 items-center gap-x-3">
+		<span class="text-2xl">🐳</span>
+		<span class="text-lg font-bold text-white tracking-tight">Odoo Manager</span>
+	</div>
+	<nav class="flex flex-1 flex-col">
+		<ul role="list" class="flex flex-1 flex-col gap-y-7">
+			<li>
+				<div class="text-xs/6 font-semibold text-gray-400 uppercase tracking-wider">Navigation</div>
+				<ul role="list" class="-mx-2 mt-2 space-y-1">
+					<li>
+						<a href="/" data-nav-link data-spa-link class="group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-gray-800 hover:text-white">
+							<svg class="size-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></svg>
+							Dashboard
+						</a>
+					</li>
+					<li>
+						<a href="/audit" data-nav-link data-spa-link class="group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-gray-800 hover:text-white">
+							<svg class="size-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+							Audit Log
+						</a>
+					</li>
+					<li>
+						<a href="/maintenance" data-nav-link data-spa-link class="group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-gray-800 hover:text-white">
+							<svg class="size-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z"/></svg>
+							Maintenance
+						</a>
+					</li>
+				</ul>
+			</li>
+			<li class="mt-auto">
+				<div data-docker-status class="flex items-center gap-x-3 rounded-md px-2 py-2 text-xs text-gray-500">
+					<span data-docker-dot class="flex h-2 w-2 shrink-0 rounded-full bg-green-500"></span>
+					<span data-docker-text>Docker Connected</span>
+				</div>
+			</li>
+		</ul>
+	</nav>
+}
+
 templ Layout(title string) {
 	<!DOCTYPE html>
-	<html lang="en" class="dark">
+	<html lang="en" class="h-full bg-gray-950">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ title } - Odoo Manager</title>
 			<link rel="stylesheet" href="/static/css/style.css"/>
 		</head>
-		<body class="bg-gray-900 text-gray-100 min-h-screen">
-			<nav class="bg-gray-800 border-b border-gray-700">
-				<div class="container mx-auto px-4 py-4">
-					<div class="flex items-center justify-between">
-						<div class="flex items-center space-x-4">
-							<h1 class="text-2xl font-bold text-blue-400">🐳 Odoo Manager</h1>
-							<a href="/" data-spa-link class="text-gray-300 hover:text-white">Dashboard</a>
-							<a href="/audit" data-spa-link class="text-gray-300 hover:text-white">Audit</a>
+		<body class="h-full text-gray-100">
+			<!-- Mobile sidebar -->
+			<div id="mobileSidebar" class="relative z-50 lg:hidden hidden" role="dialog" aria-modal="true">
+				<div class="fixed inset-0 bg-gray-900/80"></div>
+				<div class="fixed inset-0 flex">
+					<div class="relative mr-16 flex w-full max-w-xs flex-1">
+						<div class="absolute left-full top-0 flex w-16 justify-center pt-5">
+							<button type="button" class="-m-2.5 p-2.5" onclick="closeMobileSidebar()">
+								<span class="sr-only">Close sidebar</span>
+								<svg class="size-6 text-white" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+							</button>
 						</div>
-						<div class="flex items-center space-x-4">
-							<button 
-								class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+						<div class="flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 ring-1 ring-white/10">
+							@sidebarContent()
+						</div>
+					</div>
+				</div>
+			</div>
+			
+			<!-- Desktop sidebar -->
+			<div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
+				<div class="flex grow flex-col gap-y-5 overflow-y-auto border-r border-white/5 bg-gray-900 px-6 pb-4">
+					@sidebarContent()
+				</div>
+			</div>
+			
+			<!-- Main content wrapper -->
+			<div class="lg:pl-72">
+				<!-- Top bar -->
+				<div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-white/5 bg-gray-900/75 px-4 shadow-sm backdrop-blur-xl sm:gap-x-6 sm:px-6 lg:px-8">
+					<button type="button" class="-m-2.5 p-2.5 text-gray-400 lg:hidden" onclick="openMobileSidebar()">
+						<span class="sr-only">Open sidebar</span>
+						<svg class="size-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+					</button>
+					<div class="h-6 w-px bg-white/5 lg:hidden" aria-hidden="true"></div>
+					<div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
+						<div class="flex flex-1"></div>
+						<div class="flex items-center gap-x-4 lg:gap-x-6">
+							<button
 								onclick="showCreateProjectModal()"
+								class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
 							>
-								+ New Project
+								<svg class="-ml-0.5 size-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z"/></svg>
+								New Project
 							</button>
 						</div>
 					</div>
 				</div>
-			</nav>
-			<main id="main-content" class="container mx-auto px-4 py-8">
-				{ children... }
-			</main>
+				
+				<main id="main-content" class="py-10">
+					<div class="px-4 sm:px-6 lg:px-8">
+						{ children... }
+					</div>
+				</main>
+			</div>
 			
 			<!-- Create Project Modal -->
-			<div id="createProjectModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-				<div class="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-					<h2 class="text-xl font-bold mb-4">Create New Project</h2>
-					<form id="createProjectForm" onsubmit="createProject(event)">
-						<div class="mb-4">
-							<label class="block text-sm font-medium mb-2">Project Name</label>
-							<input 
-								type="text" 
-								name="name" 
-								required 
-								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-							/>
+			<div id="createProjectModal" class="hidden relative z-50">
+				<div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+				<div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+					<div class="flex min-h-full items-center justify-center p-4">
+						<div class="relative w-full max-w-lg overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl">
+							<form id="createProjectForm" onsubmit="createProject(event)">
+								<div class="px-6 pt-6 pb-4">
+									<h2 class="text-lg font-semibold text-white">Create New Project</h2>
+									<p class="mt-1 text-sm text-gray-400">Set up a new Odoo instance with Docker</p>
+									<div class="mt-6 space-y-5">
+										<div>
+											<label for="projectName" class="block text-sm/6 font-medium text-white">Project Name</label>
+											<input
+												type="text"
+												id="projectName"
+												name="name"
+												required
+												placeholder="My Project"
+												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
+											/>
+										</div>
+										<div>
+											<label for="projectDesc" class="block text-sm/6 font-medium text-white">Description</label>
+											<textarea
+												id="projectDesc"
+												name="description"
+												rows="2"
+												placeholder="Optional description"
+												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
+											></textarea>
+										</div>
+										<div class="grid grid-cols-2 gap-4">
+											<div>
+												<label for="odooVersion" class="block text-sm/6 font-medium text-white">Odoo Version</label>
+												<select
+													id="odooVersion"
+													name="odoo_version"
+													required
+													class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6 *:bg-gray-900"
+												>
+													<option value="19.0">19.0</option>
+													<option value="18.0" selected>18.0</option>
+													<option value="17.0">17.0</option>
+													<option value="16.0">16.0</option>
+													<option value="15.0">15.0</option>
+												</select>
+											</div>
+											<div>
+												<label for="pgVersion" class="block text-sm/6 font-medium text-white">PostgreSQL</label>
+												<select
+													id="pgVersion"
+													name="postgres_version"
+													required
+													class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6 *:bg-gray-900"
+												>
+													<option value="18">18</option>
+													<option value="17">17</option>
+													<option value="16" selected>16 (Recommended)</option>
+													<option value="15">15</option>
+													<option value="14">14</option>
+												</select>
+												<p id="pgvectorHint" class="text-xs text-indigo-400 mt-1.5 hidden">Odoo 19+ uses pgvector/pgvector image for AI vector extensions</p>
+											</div>
+										</div>
+										<div>
+											<label for="projectPort" class="block text-sm/6 font-medium text-white">Port</label>
+											<input
+												type="number"
+												id="projectPort"
+												name="port"
+												value="8069"
+												required
+												min="1024"
+												max="65535"
+												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
+											/>
+										</div>
+									</div>
+								</div>
+								<div class="flex items-center justify-end gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
+									<button
+										type="button"
+										onclick="hideCreateProjectModal()"
+										class="rounded-md px-3 py-2 text-sm font-semibold text-gray-300 hover:text-white"
+									>
+										Cancel
+									</button>
+									<button
+										type="submit"
+										class="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+									>
+										Create Project
+									</button>
+								</div>
+							</form>
 						</div>
-						<div class="mb-4">
-							<label class="block text-sm font-medium mb-2">Description</label>
-							<textarea 
-								name="description" 
-								rows="3" 
-								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-							></textarea>
-						</div>
-						<div class="mb-4">
-							<label class="block text-sm font-medium mb-2">Odoo Version</label>
-							<select 
-								name="odoo_version" 
-								required 
-								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-							>
-								<option value="19.0">19.0</option>
-								<option value="18.0" selected>18.0</option>
-								<option value="17.0">17.0</option>
-								<option value="16.0">16.0</option>
-								<option value="15.0">15.0</option>
-							</select>
-						</div>
-						<div class="mb-4">
-							<label class="block text-sm font-medium mb-2">PostgreSQL Version</label>
-							<select 
-								name="postgres_version" 
-								required 
-								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-							>
-								<option value="18">18</option>
-								<option value="17">17</option>
-								<option value="16" selected>16 (Recommended)</option>
-								<option value="15">15</option>
-								<option value="14">14</option>
-							</select>
-							<p id="pgvectorHint" class="text-xs text-blue-400 mt-1 hidden">Odoo 19+ uses pgvector/pgvector image for AI vector extensions</p>
-						</div>
-						<div class="mb-4">
-							<label class="block text-sm font-medium mb-2">Port</label>
-							<input 
-								type="number" 
-								name="port" 
-								value="8069" 
-								required 
-								min="1024" 
-								max="65535"
-								class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded focus:outline-none focus:border-blue-500"
-							/>
-						</div>
-						<div class="flex justify-end space-x-2">
-							<button 
-								type="button" 
-								onclick="hideCreateProjectModal()" 
-								class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded"
-							>
-								Cancel
-							</button>
-							<button 
-								type="submit" 
-								class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
-							>
-								Create
-							</button>
-						</div>
-					</form>
+					</div>
 				</div>
 			</div>
 			
+			<!-- Confirmation Modal -->
+			<div id="confirmModal" class="hidden relative z-50">
+				<div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+				<div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+					<div class="flex min-h-full items-center justify-center p-4">
+						<div class="relative w-full max-w-md overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl">
+							<div class="px-6 pt-6 pb-4">
+								<div class="flex items-start gap-4">
+									<div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+										<svg class="size-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+										</svg>
+									</div>
+									<div class="min-w-0 flex-1">
+										<h3 id="confirmModalTitle" class="text-base font-semibold text-white">Confirm Action</h3>
+										<p id="confirmModalMessage" class="mt-2 text-sm text-gray-400">Are you sure?</p>
+										<div id="confirmModalBody" class="mt-3 hidden"></div>
+									</div>
+								</div>
+							</div>
+							<div class="flex items-center justify-end gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
+								<button id="confirmModalCancel" type="button" class="rounded-md px-3 py-2 text-sm font-semibold text-gray-300 hover:text-white">Cancel</button>
+								<button id="confirmModalOk" type="button" class="rounded-md bg-red-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500">Delete</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Config Editor Modal -->
+			<div id="configModal" class="hidden relative z-50">
+				<div class="fixed inset-0 bg-gray-500/20 backdrop-blur-sm"></div>
+				<div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+					<div class="flex min-h-full items-center justify-center p-4">
+						<div class="relative w-full max-w-2xl overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 shadow-2xl">
+							<div class="px-6 pt-6 pb-4">
+								<div class="flex items-center gap-3">
+									<div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-indigo-500/10">
+										<svg class="size-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+									</div>
+									<div class="min-w-0 flex-1">
+										<h3 id="configModalTitle" class="text-base font-semibold text-white">odoo.conf</h3>
+										<p class="mt-0.5 text-xs text-gray-400">Edit the Odoo configuration file. Changes take effect after restarting the project.</p>
+									</div>
+								</div>
+								<div id="configLoading" class="mt-4 flex items-center justify-center py-12">
+									<svg class="animate-spin h-6 w-6 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+								</div>
+								<div id="configError" class="mt-4 hidden rounded-md bg-red-500/10 p-3 text-sm text-red-400 ring-1 ring-inset ring-red-500/20"></div>
+								<textarea
+									id="configEditor"
+									class="mt-4 hidden w-full rounded-md bg-gray-950 px-3 py-2 font-mono text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-600"
+									rows="18"
+									spellcheck="false"
+								></textarea>
+							</div>
+							<div class="flex items-center justify-end gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
+								<button id="configModalCancel" type="button" onclick="hideConfigModal()" class="rounded-md px-3 py-2 text-sm font-semibold text-gray-300 hover:text-white">Cancel</button>
+								<button id="configModalSave" type="button" onclick="saveConfig()" class="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">Save</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
 			<script src="/static/js/app.js"></script>
 		</body>
 	</html>
 }
 
 templ DashboardContent(projects []*store.Project) {
-	<div class="mb-8">
-		<h2 class="text-3xl font-bold mb-2">Dashboard</h2>
-		<p class="text-gray-400">Manage your Odoo projects and containers</p>
+	<div class="sm:flex sm:items-center sm:justify-between">
+		<div>
+			<h1 class="text-2xl font-bold tracking-tight text-white">Dashboard</h1>
+			<p class="mt-2 text-sm text-gray-400">Manage your Odoo projects and containers</p>
+		</div>
 	</div>
-	if len(projects) == 0 {
-		<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			<div data-empty class="bg-gray-800 rounded-lg p-8 text-center">
-				<div class="mb-4 flex justify-center"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-16 text-gray-400"><path stroke-linecap="round" stroke-linejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/></svg></div>
-				<h3 class="text-xl font-semibold mb-2">No projects yet</h3>
-				<p class="text-gray-400 mb-4">Get started by creating your first Odoo project</p>
-				<button 
-					onclick="showCreateProjectModal()" 
-					class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded"
-				>
-					Create Your First Project
-				</button>
+	<div class="mt-8">
+		if len(projects) == 0 {
+			<div id="projectGrid">
+				<div data-empty class="text-center py-16">
+					<svg class="mx-auto size-12 text-gray-600" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"/>
+					</svg>
+					<h3 class="mt-3 text-sm font-semibold text-white">No projects</h3>
+					<p class="mt-1 text-sm text-gray-400">Get started by creating your first Odoo project.</p>
+					<div class="mt-6">
+						<button
+							onclick="showCreateProjectModal()"
+							class="inline-flex items-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400"
+						>
+							<svg class="-ml-0.5 size-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z"/></svg>
+							New Project
+						</button>
+					</div>
+				</div>
 			</div>
-		</div>
-	} else {
-		<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-			for _, project := range projects {
-				@ProjectCard(project)
-			}
-		</div>
-	}
+		} else {
+			<div id="projectGrid" class="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+				for _, project := range projects {
+					@ProjectCard(project)
+				}
+			</div>
+		}
+	</div>
 }
 
 templ Index(projects []*store.Project) {
@@ -160,84 +326,126 @@ templ Index(projects []*store.Project) {
 }
 
 templ ProjectCard(project *store.Project) {
-	<div id={ "project-" + project.ID } data-project-id={ project.ID } data-port={ fmt.Sprintf("%d", project.Port) } class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-colors">
-		<div class="flex items-start justify-between mb-4">
-			<div>
-				<h3 class="text-xl font-semibold mb-1">{ project.Name }</h3>
-				<p class="text-gray-400 text-sm">{ project.Description }</p>
+	<div id={ "project-" + project.ID } data-project-id={ project.ID } data-port={ fmt.Sprintf("%d", project.Port) } class="group relative overflow-hidden rounded-xl bg-gray-900 ring-1 ring-white/10 hover:ring-indigo-500/40 transition-all duration-200">
+		<div class="p-6">
+			<div class="flex items-start justify-between">
+				<div class="min-w-0 flex-1">
+					<h3 class="text-base font-semibold text-white truncate">{ project.Name }</h3>
+					<p class="mt-1 text-sm text-gray-400 line-clamp-1">{ project.Description }</p>
+				</div>
+				<span class={ "inline-flex items-center gap-x-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset", statusClass(project.Status) }>
+					<span class={ "h-1.5 w-1.5 rounded-full", statusDotClass(project.Status) }></span>
+					{ statusDisplayText(project.Status) }
+				</span>
 			</div>
-			<span class={ "px-3 py-1 rounded-full text-xs font-medium", statusClass(project.Status) }>
-				{ project.Status }
-			</span>
-		</div>
-		
-		<div class="space-y-2 mb-4 text-sm">
-			<div class="flex justify-between">
-				<span class="text-gray-400">Odoo:</span>
-				<span>{ project.OdooVersion }</span>
+			
+			<dl class="mt-5 grid grid-cols-3 gap-3 border-t border-white/5 pt-5 text-sm">
+				<div>
+					<dt class="text-gray-500 text-xs">Odoo</dt>
+					<dd class="mt-1 font-medium text-white">v{ project.OdooVersion }</dd>
+				</div>
+				<div>
+					<dt class="text-gray-500 text-xs">PostgreSQL</dt>
+					<dd class="mt-1 font-medium text-white">v{ project.PostgresVersion }</dd>
+				</div>
+				<div>
+					<dt class="text-gray-500 text-xs">Port</dt>
+					<dd class="mt-1 font-medium text-white">{ fmt.Sprintf("%d", project.Port) }</dd>
+				</div>
+			</dl>
+			
+			<div class="mt-5 flex items-center gap-2 border-t border-white/5 pt-5">
+				if isTransientStatus(project.Status) {
+					// ── Transient: disabled buttons with spinner on the relevant action ──
+					if project.Status == "stopping" {
+						<button disabled class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-400 ring-1 ring-inset ring-red-500/20 opacity-50 cursor-not-allowed">
+							<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+						</button>
+						<span class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm opacity-50 cursor-not-allowed pointer-events-none">Open</span>
+						<button disabled class="rounded-md bg-white/5 p-2 text-gray-400 opacity-50 cursor-not-allowed" title="Backup Database">
+							<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
+						</button>
+					} else if project.Status == "deleting" {
+						<button disabled class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-green-500/10 px-3 py-2 text-sm font-semibold text-green-400 ring-1 ring-inset ring-green-500/20 opacity-50 cursor-not-allowed">Start</button>
+					} else {
+						// creating or starting — spinner on Start button
+						<button disabled class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-green-500/10 px-3 py-2 text-sm font-semibold text-green-400 ring-1 ring-inset ring-green-500/20 opacity-50 cursor-not-allowed">
+							<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+						</button>
+					}
+					<button disabled class="rounded-md bg-white/5 p-2 text-gray-400 opacity-50 cursor-not-allowed" title="View Logs">
+						<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+					</button>
+					if project.Status == "deleting" {
+						<button disabled class="rounded-md bg-white/5 p-2 text-gray-400 opacity-50 cursor-not-allowed" title="Delete Project">
+							<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+						</button>
+					} else {
+						<button disabled class="rounded-md bg-white/5 p-2 text-gray-400 opacity-50 cursor-not-allowed" title="Delete Project">
+							<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
+						</button>
+					}
+				} else if project.Status == "running" {
+					<button
+						onclick={ stopProject(project.ID) }
+						class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-400 ring-1 ring-inset ring-red-500/20 hover:bg-red-500/20 transition-colors"
+					>
+						Stop
+					</button>
+					<a
+						href={ templ.URL(fmt.Sprintf("http://localhost:%d", project.Port)) }
+						target="_blank"
+						class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 transition-colors"
+					>
+						Open
+					</a>
+					<button
+						onclick={ backupProject(project.ID) }
+						class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+						title="Backup Database"
+					>
+						<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
+					</button>
+				} else {
+					<button
+						onclick={ startProject(project.ID) }
+						class="flex-1 inline-flex items-center justify-center gap-x-1.5 rounded-md bg-green-500/10 px-3 py-2 text-sm font-semibold text-green-400 ring-1 ring-inset ring-green-500/20 hover:bg-green-500/20 transition-colors"
+					>
+						Start
+					</button>
+				}
+				if !isTransientStatus(project.Status) {
+					<button
+						onclick={ showConfig(project.ID) }
+						class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+						title="Edit Config"
+					>
+						<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+					</button>
+					<button
+						onclick={ showLogs(project.ID) }
+						class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+						title="View Logs"
+					>
+						<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+					</button>
+					<button
+						onclick={ deleteProject(project.ID) }
+						class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 transition-colors"
+						title="Delete Project"
+					>
+						<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
+					</button>
+				}
 			</div>
-			<div class="flex justify-between">
-				<span class="text-gray-400">PostgreSQL:</span>
-				<span>{ project.PostgresVersion }</span>
-			</div>
-			<div class="flex justify-between">
-				<span class="text-gray-400">Port:</span>
-				<span>{ fmt.Sprintf("%d", project.Port) }</span>
-			</div>
-		</div>
-		
-		<div class="flex space-x-2">
-			if project.Status == "running" {
-				<button 
-					onclick={ stopProject(project.ID) }
-					class="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
-				>
-					Stop
-				</button>
-				<a 
-					href={ templ.URL(fmt.Sprintf("http://localhost:%d", project.Port)) }
-					target="_blank"
-					class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm text-center"
-				>
-					Open
-				</a>
-				<button 
-					onclick={ backupProject(project.ID) }
-					class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-blue-400 rounded text-sm"
-					title="Backup Database"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/></svg>
-				</button>
-			} else {
-				<button 
-					onclick={ startProject(project.ID) }
-					class="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm"
-				>
-					Start
-				</button>
-			}
-			<button 
-				onclick={ showLogs(project.ID) }
-				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm"
-				title="View Logs"
-			>
-				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
-			</button>
-			<button 
-				onclick={ deleteProject(project.ID) }
-				class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-red-400 rounded text-sm"
-				title="Delete Project"
-			>
-				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
-			</button>
 		</div>
 	</div>
 }
 
 templ ProjectsList(projects []*store.Project) {
 	@Layout("Projects") {
-		<h2 class="text-3xl font-bold mb-6">Projects</h2>
-		<div id="projectGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+		<h2 class="text-2xl font-bold tracking-tight text-white mb-6">Projects</h2>
+		<div id="projectGrid" class="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
 			for _, project := range projects {
 				@ProjectCard(project)
 			}
@@ -245,25 +453,55 @@ templ ProjectsList(projects []*store.Project) {
 	}
 }
 
+func isTransientStatus(status string) bool {
+	switch status {
+	case "creating", "deleting", "starting", "stopping":
+		return true
+	}
+	return false
+}
+
+func statusDisplayText(status string) string {
+	if isTransientStatus(status) {
+		return status + "\u2026"
+	}
+	return status
+}
+
 func statusClass(status string) string {
 	switch status {
 	case "running":
-		return "bg-green-600"
+		return "bg-green-400/10 text-green-400 ring-green-400/20"
 	case "stopped":
-		return "bg-gray-600"
+		return "bg-gray-400/10 text-gray-400 ring-gray-400/20"
 	case "error":
-		return "bg-red-600"
+		return "bg-red-400/10 text-red-400 ring-red-400/20"
+	case "creating", "starting", "stopping", "deleting":
+		return "bg-yellow-400/10 text-yellow-400 ring-yellow-400/20"
 	default:
-		return "bg-gray-600"
+		return "bg-gray-400/10 text-gray-400 ring-gray-400/20"
+	}
+}
+
+func statusDotClass(status string) string {
+	switch status {
+	case "running":
+		return "bg-green-400"
+	case "error":
+		return "bg-red-400"
+	case "creating", "starting", "stopping", "deleting":
+		return "bg-yellow-400 animate-pulse"
+	default:
+		return "bg-gray-400"
 	}
 }
 
 templ AuditContent() {
-	<div class="mb-8">
-		<h2 class="text-3xl font-bold mb-2">Audit Log</h2>
-		<p class="text-gray-400">Real-time log of client‑to‑server events</p>
+	<div>
+		<h1 class="text-2xl font-bold tracking-tight text-white">Audit Log</h1>
+		<p class="mt-2 text-sm text-gray-400">Real-time log of client-to-server events</p>
 	</div>
-	<div id="auditContainer" class="bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-sm leading-relaxed overflow-y-auto" style="height: calc(100vh - 250px);">
+	<div id="auditContainer" class="mt-8 rounded-xl bg-gray-900 ring-1 ring-white/10 p-4 font-mono text-sm leading-relaxed overflow-y-auto" style="height: calc(100vh - 250px);">
 		<div id="auditLoadMore" class="text-center py-2 hidden">
 			<span class="text-gray-500 text-xs">Loading…</span>
 		</div>
@@ -274,6 +512,81 @@ templ AuditContent() {
 templ Audit() {
 	@Layout("Audit") {
 		@AuditContent()
+	}
+}
+
+templ MaintenanceContent() {
+	<div>
+		<h1 class="text-2xl font-bold tracking-tight text-white">Maintenance</h1>
+		<p class="mt-2 text-sm text-gray-400">Clean up Docker resources that are not associated with any project</p>
+	</div>
+
+	<div class="mt-8 rounded-xl bg-yellow-500/5 ring-1 ring-yellow-500/20 p-4">
+		<div class="flex gap-3">
+			<svg class="size-5 shrink-0 text-yellow-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+			</svg>
+			<div>
+				<p class="text-sm font-medium text-yellow-300">Warning</p>
+				<p class="mt-1 text-sm text-yellow-400/80">These actions will remove any data that is not managed by Odoo Manager. Resources created by other applications or direct Docker usage will be permanently deleted.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+		<!-- Clean Orphaned Containers -->
+		<div class="rounded-xl bg-gray-900 ring-1 ring-white/10 p-6 flex flex-col">
+			<div class="flex items-center gap-3">
+				<div class="flex size-10 items-center justify-center rounded-lg bg-indigo-500/10">
+					<svg class="size-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"/>
+					</svg>
+				</div>
+				<h3 class="text-base font-semibold text-white">Containers</h3>
+			</div>
+			<p class="mt-3 text-sm text-gray-400 flex-1">Remove all Docker containers that are not part of any managed project, including stopped containers.</p>
+			<button onclick="cleanOrphaned('containers')" id="cleanContainersBtn" class="mt-4 w-full rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition-colors">
+				Clean Orphaned Containers
+			</button>
+		</div>
+
+		<!-- Clean Orphaned Volumes -->
+		<div class="rounded-xl bg-gray-900 ring-1 ring-white/10 p-6 flex flex-col">
+			<div class="flex items-center gap-3">
+				<div class="flex size-10 items-center justify-center rounded-lg bg-emerald-500/10">
+					<svg class="size-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125"/>
+					</svg>
+				</div>
+				<h3 class="text-base font-semibold text-white">Volumes</h3>
+			</div>
+			<p class="mt-3 text-sm text-gray-400 flex-1">Remove all Docker volumes not mounted by any managed project. This permanently deletes stored data.</p>
+			<button onclick="cleanOrphaned('volumes')" id="cleanVolumesBtn" class="mt-4 w-full rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition-colors">
+				Clean Orphaned Volumes
+			</button>
+		</div>
+
+		<!-- Clean Orphaned Images -->
+		<div class="rounded-xl bg-gray-900 ring-1 ring-white/10 p-6 flex flex-col">
+			<div class="flex items-center gap-3">
+				<div class="flex size-10 items-center justify-center rounded-lg bg-amber-500/10">
+					<svg class="size-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5a1.5 1.5 0 0 0 1.5-1.5V5.25a1.5 1.5 0 0 0-1.5-1.5H3.75a1.5 1.5 0 0 0-1.5 1.5v14.25a1.5 1.5 0 0 0 1.5 1.5Zm9-12.75h.008v.008H12.75V8.25Z"/>
+					</svg>
+				</div>
+				<h3 class="text-base font-semibold text-white">Images</h3>
+			</div>
+			<p class="mt-3 text-sm text-gray-400 flex-1">Remove all Docker images not used by any managed container, including pulled images from other sources.</p>
+			<button onclick="cleanOrphaned('images')" id="cleanImagesBtn" class="mt-4 w-full rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition-colors">
+				Clean Orphaned Images
+			</button>
+		</div>
+	</div>
+}
+
+templ Maintenance() {
+	@Layout("Maintenance") {
+		@MaintenanceContent()
 	}
 }
 
@@ -295,4 +608,8 @@ script deleteProject(id string) {
 
 script backupProject(id string) {
 	window.backupProject(id);
+}
+
+script showConfig(id string) {
+	window.showConfigModal(id);
 }
