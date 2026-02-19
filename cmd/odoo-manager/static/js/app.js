@@ -351,13 +351,28 @@ function showCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.remove('hidden');
   modal.querySelector('.bg-gray-800').classList.add('animate-modal-fade-in');
+  updatePgvectorHint();
 }
 
 function hideCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.add('hidden');
   document.getElementById('createProjectForm').reset();
+  updatePgvectorHint();
 }
+
+// Show/hide pgvector hint based on selected Odoo version
+function updatePgvectorHint() {
+  const odooSelect = document.querySelector('select[name="odoo_version"]');
+  const hint = document.getElementById('pgvectorHint');
+  if (!odooSelect || !hint) return;
+  const major = parseInt(odooSelect.value);
+  hint.classList.toggle('hidden', major < 19);
+}
+// Listen for Odoo version changes in the create form
+document.addEventListener('change', (e) => {
+  if (e.target.name === 'odoo_version') updatePgvectorHint();
+});
 
 // ── API Actions ───────────────────────────────────────────────────────
 

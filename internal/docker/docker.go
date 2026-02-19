@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -46,12 +47,28 @@ func projectLabels(projectID string, role string) map[string]string {
 	}
 }
 
+// postgresImage returns the Docker image reference for PostgreSQL.
+// Odoo 19+ requires pgvector extensions, so we use the pgvector/pgvector
+// image (tags like pg16-trixie). Older Odoo versions use the standard
+// postgres:{version} image.
+func postgresImage(odooVersion string, pgVersion string) string {
+	odooMajor := 0
+	parts := strings.SplitN(odooVersion, ".", 2)
+	if len(parts) > 0 {
+		odooMajor, _ = strconv.Atoi(parts[0])
+	}
+	if odooMajor >= 19 {
+		return fmt.Sprintf("pgvector/pgvector:pg%s-trixie", pgVersion)
+	}
+	return fmt.Sprintf("postgres:%s", pgVersion)
+}
+
 // CreateProject pulls images and creates containers for a project without starting them.
 func (m *Manager) CreateProject(ctx context.Context, project *store.Project) error {
 	// Create Postgres container
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 	postgresConfig := &container.Config{
-		Image: fmt.Sprintf("postgres:%s", project.PostgresVersion),
+		Image: postgresImage(project.OdooVersion, project.PostgresVersion),
 		Env: []string{
 			"POSTGRES_DB=postgres",
 			"POSTGRES_USER=odoo",
@@ -111,7 +128,7 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 	// Start Postgres container first
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 	postgresConfig := &container.Config{
-		Image: fmt.Sprintf("postgres:%s", project.PostgresVersion),
+		Image: postgresImage(project.OdooVersion, project.PostgresVersion),
 		Env: []string{
 			"POSTGRES_DB=postgres",
 			"POSTGRES_USER=odoo",

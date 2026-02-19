@@ -105,7 +105,7 @@ The application will start on `http://localhost:8080`
    - **Name**: Your project name
    - **Description**: Optional project description
    - **Odoo Version**: Select from 15.0, 16.0, 17.0, 18.0, 19.0
-   - **PostgreSQL Version**: Select from 13, 14, 15, 16
+   - **PostgreSQL Version**: Select from 14, 15, 16, 17, 18
    - **Port**: Port to expose Odoo (default: 8069)
 3. Click **"Create"** — containers are automatically pulled and created in the background
 
@@ -267,7 +267,7 @@ docker ps --filter label=odoo-manager.managed=true
 ### Default Container Configuration
 
 **PostgreSQL:**
-- Image: `postgres:{version}`
+- Image: `postgres:{version}` (Odoo ≤ 18), `pgvector/pgvector:pg{version}-trixie` (Odoo ≥ 19)
 - Database: `postgres`
 - User: `odoo`
 - Password: `odoo`
