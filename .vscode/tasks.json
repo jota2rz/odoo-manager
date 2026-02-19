@@ -8,6 +8,21 @@
             "args": ["run", "github.com/a-h/templ/cmd/templ@latest", "generate"],
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "tailwind-build",
+            "type": "shell",
+            "command": ".\\bin\\tailwindcss.exe",
+            "args": ["-i", "src/css/input.css", "-o", "cmd/odoo-manager/static/css/style.css", "--minify"],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "build-all",
+            "dependsOn": ["templ-generate", "tailwind-build"],
+            "dependsOrder": "parallel",
+            "group": "build",
+            "problemMatcher": []
         }
     ]
 }

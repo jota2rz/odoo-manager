@@ -216,6 +216,12 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// SPA navigation: return only the inner content
+	if r.Header.Get("X-Spa") == "1" {
+		templates.DashboardContent(projects).Render(r.Context(), w)
+		return
+	}
+
 	component := templates.Index(projects)
 	component.Render(r.Context(), w)
 }
@@ -975,6 +981,12 @@ func (h *Handler) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 // handleAuditPage serves the Audit log viewer page.
 func (h *Handler) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	// SPA navigation: return only the inner content
+	if r.Header.Get("X-Spa") == "1" {
+		templates.AuditContent().Render(r.Context(), w)
+		return
+	}
+
 	component := templates.Audit()
 	component.Render(r.Context(), w)
 }

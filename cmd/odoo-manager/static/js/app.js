@@ -339,7 +339,11 @@ function hideDockerDownOverlay() {
 }
 
 // Connect on page load
-document.addEventListener('DOMContentLoaded', connectSSE);
+document.addEventListener('DOMContentLoaded', () => {
+  connectSSE();
+  updateActiveNav(location.pathname);
+  initCurrentPage();
+});
 
 // ── Modal management ──────────────────────────────────────────────────
 
@@ -736,15 +740,84 @@ function showNotification(message, type = 'info') {
 
 // ── Audit Log Page ────────────────────────────────────────────────────
 
-(function initAuditPage() {
+// ── SPA Client-Side Router ────────────────────────────────────────────
+// Intercepts navigation link clicks to swap only <main> content, keeping
+// the persistent SSE connection alive across page transitions.
+
+let _pageCleanup = null;
+
+function navigate(url, pushState = true) {
+  // Clean up the current page (e.g. audit SSE)
+  if (_pageCleanup) {
+    _pageCleanup();
+    _pageCleanup = null;
+  }
+
+  fetch(url, { headers: { 'X-Spa': '1' } })
+    .then(r => r.text())
+    .then(html => {
+      const main = document.getElementById('main-content');
+      if (main) main.innerHTML = html;
+      if (pushState) history.pushState({}, '', url);
+      updateActiveNav(url);
+      initCurrentPage();
+    })
+    .catch(err => {
+      console.error('SPA navigation failed:', err);
+      location.href = url; // fall back to full page load
+    });
+}
+
+function updateActiveNav(url) {
+  document.querySelectorAll('[data-spa-link]').forEach(link => {
+    const isActive = link.getAttribute('href') === url;
+    link.classList.toggle('text-white', isActive);
+    link.classList.toggle('font-semibold', isActive);
+    link.classList.toggle('text-gray-300', !isActive);
+  });
+}
+
+function initCurrentPage() {
+  const path = location.pathname;
+  if (path === '/audit') {
+    _pageCleanup = initAuditPage();
+  }
+}
+
+// Intercept SPA nav link clicks (event delegation on document)
+document.addEventListener('click', (e) => {
+  const link = e.target.closest('[data-spa-link]');
+  if (link) {
+    e.preventDefault();
+    const href = link.getAttribute('href');
+    if (href !== location.pathname) {
+      navigate(href);
+    }
+    return;
+  }
+  // Close modal on backdrop click
+  const modal = document.getElementById('createProjectModal');
+  if (e.target === modal) hideCreateProjectModal();
+});
+
+// Handle browser back/forward
+window.addEventListener('popstate', () => {
+  navigate(location.pathname, false);
+});
+
+// ── Audit Log Page ────────────────────────────────────────────────────
+
+function initAuditPage() {
   const container = document.getElementById('auditContainer');
   const logsDiv   = document.getElementById('auditLogs');
   const loadMore  = document.getElementById('auditLoadMore');
-  if (!container || !logsDiv) return; // Not on the audit page
+  if (!container || !logsDiv) return null;
 
-  let currentOffset = 0;   // lines already loaded (counted from the end)
+  let currentOffset = 0;
   let loading = false;
-  let allLoaded = false;    // true once we've reached the top of the file
+  let allLoaded = false;
+  let auditSrc = null;
+  let destroyed = false;
 
   function appendLine(text) {
     const line = document.createElement('div');
@@ -777,7 +850,6 @@ function showNotification(message, type = 'info') {
       if (!data.lines || data.lines.length < 100) {
         allLoaded = true;
       }
-      // Scroll to bottom initially
       container.scrollTop = container.scrollHeight;
     } finally {
       loading = false;
@@ -801,8 +873,6 @@ function showNotification(message, type = 'info') {
       }
       prependLines(data.lines);
       currentOffset = data.offset;
-
-      // Preserve scroll position after prepending
       container.scrollTop = container.scrollHeight - prevScrollHeight;
 
       if (data.lines.length < 100) {
@@ -814,18 +884,17 @@ function showNotification(message, type = 'info') {
     }
   }
 
-  // Load more when scrolling near the top
   container.addEventListener('scroll', () => {
     if (container.scrollTop < 80) {
       loadOlder();
     }
   });
 
-  // SSE real-time stream
   function connectAuditSSE() {
-    const src = new EventSource('/api/audit/stream');
+    if (destroyed) return;
+    auditSrc = new EventSource('/api/audit/stream');
 
-    src.onmessage = function(e) {
+    auditSrc.onmessage = function(e) {
       try {
         const entry = JSON.parse(e.data);
         const line = `[${entry.timestamp}] ${entry.client_ip} ${entry.method} ${entry.path} — ${entry.message}`;
@@ -840,24 +909,25 @@ function showNotification(message, type = 'info') {
       }
     };
 
-    src.onerror = function() {
-      src.close();
-      setTimeout(connectAuditSSE, 3000);
+    auditSrc.onerror = function() {
+      auditSrc.close();
+      if (!destroyed) setTimeout(connectAuditSSE, 3000);
     };
-
-    // Clean up when leaving the page
-    window.addEventListener('beforeunload', () => src.close(), { once: true });
   }
 
   loadInitial().then(() => connectAuditSSE());
-})();
 
-// ── Keyboard / click handlers ─────────────────────────────────────────
+  // Return cleanup function
+  return () => {
+    destroyed = true;
+    if (auditSrc) {
+      auditSrc.close();
+      auditSrc = null;
+    }
+  };
+}
 
-window.addEventListener('click', (event) => {
-  const modal = document.getElementById('createProjectModal');
-  if (event.target === modal) hideCreateProjectModal();
-});
+// ── Keyboard handler ──────────────────────────────────────────────────
 
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') hideCreateProjectModal();
