@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odoo Manager</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --accent-hover: #79c0ff;
+            --green: #3fb950;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        header {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        h1 .emoji {
+            font-size: 2rem;
+        }
+
+        .tagline {
+            color: var(--text-muted);
+            font-size: 1.15rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #1f2937;
+            color: var(--green);
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.2rem 0.6rem;
+            border-radius: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .download-section {
+            text-align: center;
+            padding: 2rem 0;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: #1f6feb;
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .download-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .download-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            text-align: center;
+        }
+
+        .download-card h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+        }
+
+        .download-card .platform-links {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .download-card .platform-links a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.45rem 1rem;
+            border-radius: 0.4rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .dl-primary {
+            background: var(--accent);
+            color: #000;
+        }
+
+        .dl-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        .dl-secondary {
+            background: #21262d;
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .dl-secondary:hover {
+            background: #30363d;
+        }
+
+        .download-hint {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-align: center;
+            margin-top: 0.5rem;
+        }
+
+        .download-hint a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .download-hint a:hover {
+            text-decoration: underline;
+        }
+
+        section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        h2 .icon {
+            font-size: 1.1rem;
+        }
+
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .features li {
+            padding: 0.4rem 0;
+            color: var(--text-muted);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+        }
+
+        .features li::before {
+            content: "✓";
+            color: var(--green);
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .how-it-works ol {
+            padding-left: 1.25rem;
+        }
+
+        .how-it-works li {
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+        }
+
+        .how-it-works li strong {
+            color: var(--text);
+        }
+
+        .how-it-works code {
+            background: #1f2937;
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.85em;
+            color: var(--accent);
+        }
+
+        .requirements ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .requirements li {
+            padding: 0.3rem 0;
+            color: var(--text-muted);
+        }
+
+        .requirements li::before {
+            content: "•";
+            color: var(--accent);
+            margin-right: 0.5rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem 0;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        @media (max-width: 600px) {
+            .download-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span class="emoji">🐳</span> Odoo Manager</h1>
+            <p class="tagline">A modern web app for managing Odoo &amp; PostgreSQL Docker containers locally</p>
+            <span class="badge">100% Vibe Coded</span>
+        </header>
+
+        <img src="dashboard.JPG" alt="Odoo Manager Dashboard" style="width:100%;border-radius:0.75rem;border:1px solid var(--border);margin-bottom:1.5rem;">
+        <img src="config.JPG" alt="Odoo Manager Configuration" style="width:100%;border-radius:0.75rem;border:1px solid var(--border);margin-bottom:2rem;">
+
+        <div class="download-section">
+            <span id="version-badge" class="version-badge">Loading version...</span>
+
+            <div class="download-grid">
+                <div class="download-card">
+                    <h3>🐧 Linux</h3>
+                    <div class="platform-links">
+                        <a id="dl-linux-amd64" href="https://github.com/jota2rz/odoo-manager/releases/latest" class="dl-primary">⬇ Linux x64 (.tar.gz)</a>
+                        <a id="dl-linux-arm64" href="https://github.com/jota2rz/odoo-manager/releases/latest" class="dl-secondary">⬇ Linux ARM64 (.tar.gz)</a>
+                    </div>
+                </div>
+                <div class="download-card">
+                    <h3>🍎 macOS</h3>
+                    <div class="platform-links">
+                        <a id="dl-darwin-arm64" href="https://github.com/jota2rz/odoo-manager/releases/latest" class="dl-primary">⬇ Apple Silicon (.tar.gz)</a>
+                        <a id="dl-darwin-amd64" href="https://github.com/jota2rz/odoo-manager/releases/latest" class="dl-secondary">⬇ Intel (.tar.gz)</a>
+                    </div>
+                </div>
+                <div class="download-card" style="grid-column: 1 / -1;">
+                    <h3>🖥️ Windows</h3>
+                    <div class="platform-links">
+                        <a id="dl-windows-amd64" href="https://github.com/jota2rz/odoo-manager/releases/latest" class="dl-primary">⬇ Windows x64 (.zip)</a>
+                    </div>
+                </div>
+            </div>
+
+            <p class="download-hint">
+                <a href="https://github.com/jota2rz/odoo-manager/releases">View all releases</a>
+            </p>
+        </div>
+
+        <script>
+            fetch('https://api.github.com/repos/jota2rz/odoo-manager/releases/latest')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.tag_name) {
+                        const v = d.tag_name.replace(/^v/, '');
+                        document.getElementById('version-badge').textContent = 'Latest: ' + d.tag_name;
+
+                        const links = {
+                            'dl-linux-amd64':   'odoo-manager_' + v + '_linux_amd64.tar.gz',
+                            'dl-linux-arm64':   'odoo-manager_' + v + '_linux_arm64.tar.gz',
+                            'dl-darwin-amd64':  'odoo-manager_' + v + '_darwin_amd64.tar.gz',
+                            'dl-darwin-arm64':  'odoo-manager_' + v + '_darwin_arm64.tar.gz',
+                            'dl-windows-amd64': 'odoo-manager_' + v + '_windows_amd64.zip',
+                        };
+
+                        const base = 'https://github.com/jota2rz/odoo-manager/releases/download/' + d.tag_name + '/';
+                        for (const [id, file] of Object.entries(links)) {
+                            const el = document.getElementById(id);
+                            if (el) el.href = base + file;
+                        }
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('version-badge').textContent = 'Latest release';
+                });
+        </script>
+
+        <section class="features">
+            <h2><span class="icon">✨</span> Features</h2>
+            <ul>
+                <li>Easy project management — create, start, stop, and delete Odoo projects with a few clicks</li>
+                <li>Docker integration — automatic management of Odoo and PostgreSQL containers</li>
+                <li>Real-time UI — live project status, spinner sync, and log streaming via Server-Sent Events (SSE)</li>
+                <li>Database backup — one-click backup with real-time progress streaming and automatic download</li>
+                <li>Audit log — full audit trail with real-time viewer, file logging, and scroll-back pagination</li>
+                <li>Dark theme UI — modern, responsive interface built with Tailwind CSS and Heroicons SVGs</li>
+                <li>Embedded frontend — all assets embedded in a single binary using Templ</li>
+                <li>SQLite storage — ACID-compliant project persistence with automatic schema migrations</li>
+                <li>Docker labels — containers labeled for reliable discovery and management</li>
+                <li>Status reconciliation — auto-detects and corrects stale container states</li>
+                <li>Idempotent operations — start/stop/delete actions are async, safe to repeat, and sync across browsers</li>
+                <li>Docker health check — continuous monitoring with automatic UI overlay</li>
+                <li>Connection recovery — automatic SSE reconnection with version-based reload</li>
+                <li>ANSI color support — terminal colors rendered faithfully in log viewers</li>
+                <li>GitHub repository integration — clone and mount custom addons repos with branch selection</li>
+                <li>Enterprise &amp; Design Themes — one-toggle support via GitHub PAT</li>
+                <li>PAT validation — GitHub Personal Access Token validation at startup with status badge</li>
+                <li>Update Odoo — pull latest Docker image and recreate container while preserving data</li>
+                <li>Update repositories — git-pull all configured repos with smart restart</li>
+                <li>Per-project configuration — edit odoo.conf and repository settings with Save &amp; Restart</li>
+                <li>Auto pip install — automatically installs Python dependencies from requirements.txt</li>
+                <li>Portable Git (Windows) — auto-downloads MinGit on Windows</li>
+                <li>Maintenance tools — clean orphaned Docker containers, volumes, networks, and images</li>
+                <li>Reverse proxy aware — client IP detection via X-Forwarded-For and X-Real-Ip headers</li>
+                <li>Fast &amp; lightweight — minimal dependencies, quick startup</li>
+            </ul>
+        </section>
+
+        <section class="requirements">
+            <h2><span class="icon">📋</span> Prerequisites</h2>
+            <ul>
+                <li>Docker (with Docker daemon running)</li>
+                <li>Git (optional — auto-downloaded as MinGit on Windows; install from <a href="https://git-scm.com/" style="color: var(--accent);">git-scm.com</a> on macOS/Linux)</li>
+            </ul>
+        </section>
+
+        <section class="how-it-works">
+            <h2><span class="icon">⚡</span> Getting Started</h2>
+            <ol>
+                <li>
+                    <strong>Download</strong> — grab the binary for your platform from the downloads above.
+                </li>
+                <li>
+                    <strong>Extract &amp; run</strong> — on Linux/macOS: <code>tar xzf odoo-manager_*.tar.gz &amp;&amp; ./odoo-manager</code>. On Windows: extract the zip and run <code>odoo-manager.exe</code>.
+                </li>
+                <li>
+                    <strong>Open the dashboard</strong> — navigate to <code>http://localhost:8080</code> in your browser.
+                </li>
+                <li>
+                    <strong>Create a project</strong> — click "New Project", choose your Odoo version, and configure addons repos if needed.
+                </li>
+            </ol>
+        </section>
+
+        <footer>
+            <div class="footer-links">
+                <a href="https://github.com/jota2rz/odoo-manager">GitHub</a>
+                <a href="https://github.com/jota2rz/odoo-manager/blob/main/README.md">Technical Documentation</a>
+                <a href="https://github.com/jota2rz/odoo-manager/issues">Report Issue or Enhancement</a>
+            </div>
+            <p>MIT License · Built with Go, Templ &amp; Tailwind CSS · AI-assisted by Claude Opus 4.6</p>
+        </footer>
+    </div>
+</body>
+</html>

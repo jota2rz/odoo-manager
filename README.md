@@ -25,7 +25,7 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 - 🔃 **Update Repositories** - Git-pull all configured repos (addons, Enterprise, Design Themes) with smart restart (skips if dev mode is active)
 - ⚙️ **Per-Project Configuration** - Edit `odoo.conf` and repository settings per project with Save & Restart support
 - 📦 **Auto pip Install** - Automatically installs Python dependencies from `requirements.txt` in the addons repo on container start
-- 🪟 **Portable Git (Windows)** - Auto-downloads MinGit on Windows; shows a dashboard warning with install link on macOS/Linux
+- 🖥️ **Portable Git (Windows)** - Auto-downloads MinGit on Windows; shows a dashboard warning with install link on macOS/Linux
 - 🧹 **Maintenance Tools** - Clean orphaned Docker containers, volumes, networks, and images
 - 🌐 **Reverse Proxy Aware** - Client IP detection via `X-Forwarded-For` and `X-Real-Ip` headers
 - ⚡ **Fast & Lightweight** - Minimal dependencies, quick startup
