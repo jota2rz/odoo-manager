@@ -225,7 +225,9 @@ function statusBadgeClass(status) {
     case 'creating':
     case 'starting':
     case 'stopping':
-    case 'deleting': return 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/20';
+    case 'deleting':
+    case 'updating':
+    case 'updating-repo': return 'bg-yellow-400/10 text-yellow-400 ring-yellow-400/20';
     default:         return 'bg-gray-400/10 text-gray-400 ring-gray-400/20';
   }
 }
@@ -237,14 +239,16 @@ function statusDotClass(status) {
     case 'creating':
     case 'starting':
     case 'stopping':
-    case 'deleting': return 'bg-yellow-400 animate-pulse';
+    case 'deleting':
+    case 'updating':
+    case 'updating-repo': return 'bg-yellow-400 animate-pulse';
     default:         return 'bg-gray-400';
   }
 }
 
 // Build a project card DOM element matching the Templ-rendered structure
 function buildProjectCard(project) {
-  const isTransient = ['creating', 'deleting', 'starting', 'stopping'].includes(project.status);
+  const isTransient = ['creating', 'deleting', 'starting', 'stopping', 'updating', 'updating-repo'].includes(project.status);
   const card = document.createElement('div');
   card.id = 'project-' + project.id;
   card.dataset.projectId = project.id;
@@ -253,6 +257,12 @@ function buildProjectCard(project) {
 
   // For transient statuses, render the button layout that matches the base state
   const showRunningLayout = project.status === 'running' || project.status === 'stopping';
+
+  // Status display text
+  let statusText = project.status;
+  if (project.status === 'updating') statusText = 'updating…';
+  else if (project.status === 'updating-repo') statusText = 'updating repos…';
+  else if (isTransient) statusText = project.status + '…';
 
   let actionButtons = '';
   if (showRunningLayout) {
@@ -270,6 +280,27 @@ function buildProjectCard(project) {
     `;
   }
 
+  // Update buttons row
+  const refreshIcon = '<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.016 4.356v4.992"/></svg>';
+  const codeIcon = '<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>';
+  const spinIcon = '<svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+
+  let updateOdooBtn = '';
+  if (isTransient) {
+    updateOdooBtn = `<button disabled class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-500 cursor-not-allowed">${project.status === 'updating' ? spinIcon : refreshIcon} Update Odoo</button>`;
+  } else {
+    updateOdooBtn = `<button onclick="window.updateOdoo('${project.id}')" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-500/20 transition hover:bg-blue-500/20">${refreshIcon} Update Odoo</button>`;
+  }
+
+  let updateCodeBtn = '';
+  if (project.git_repo_url) {
+    if (isTransient) {
+      updateCodeBtn = `<button disabled class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-500 cursor-not-allowed">${project.status === 'updating-repo' ? spinIcon : codeIcon} Update Repositories</button>`;
+    } else {
+      updateCodeBtn = `<button onclick="window.updateRepoCode('${project.id}')" class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-400 ring-1 ring-inset ring-purple-500/20 transition hover:bg-purple-500/20">${codeIcon} Update Repositories</button>`;
+    }
+  }
+
   card.innerHTML = `
     <div class="p-6">
       <div class="flex items-start justify-between">
@@ -279,7 +310,7 @@ function buildProjectCard(project) {
         </div>
         <span class="inline-flex items-center gap-x-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${statusBadgeClass(project.status)}">
           <span class="h-1.5 w-1.5 rounded-full ${statusDotClass(project.status)}"></span>
-          ${escapeHTML(isTransient ? project.status + '…' : project.status)}
+          ${escapeHTML(statusText)}
         </span>
       </div>
       <dl class="mt-5 grid grid-cols-3 gap-3 border-t border-white/5 pt-5 text-sm">
@@ -293,6 +324,10 @@ function buildProjectCard(project) {
         <button onclick="window.showLogs('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="View Logs"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg></button>
         <button onclick="window.deleteProject('${project.id}')" class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 transition-colors" title="Delete Project"><svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg></button>
       </div>
+      <div class="mt-4 flex items-center gap-2 border-t border-white/5 pt-4" data-update-buttons>
+        ${updateOdooBtn}
+        ${updateCodeBtn}
+      </div>
     </div>
   `;
 
@@ -303,6 +338,8 @@ function buildProjectCard(project) {
       const spinnerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
 
       btnRow.querySelectorAll('button').forEach(btn => {
+        // Keep Delete button enabled for non-deleting transient statuses
+        if (btn.title === 'Delete Project' && project.status !== 'deleting') return;
         btn.disabled = true;
         btn.classList.add('opacity-50', 'cursor-not-allowed');
       });
@@ -347,8 +384,9 @@ function setCardPending(projectId, action) {
 
   const spinnerHTML = `<svg class="animate-spin h-4 w-4 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>`;
 
-  // Disable all buttons
+  // Disable all buttons (keep Delete enabled unless we're deleting)
   btnRow.querySelectorAll('button').forEach(btn => {
+    if (btn.title === 'Delete Project' && action !== 'deleting') return;
     btn.disabled = true;
     btn.classList.add('opacity-50', 'cursor-not-allowed');
   });
@@ -365,12 +403,32 @@ function setCardPending(projectId, action) {
     targetBtn = btnRow.querySelector('[title="Delete Project"]');
   } else if (action === 'backing up') {
     targetBtn = btnRow.querySelector('[title="Backup Database"]');
+  } else if (action === 'updating' || action === 'updating-repo') {
+    // Spinner is handled in the update buttons row below
   } else {
     // "starting" or "stopping" — first button in the row (Start/Stop)
     targetBtn = btnRow.querySelector('button');
   }
   if (targetBtn) {
     targetBtn.innerHTML = spinnerHTML;
+  }
+
+  // Disable update buttons row and show spinner on matching action
+  const updateRow = card.querySelector('[data-update-buttons]');
+  if (updateRow) {
+    updateRow.querySelectorAll('button').forEach(btn => {
+      btn.disabled = true;
+      btn.classList.remove('bg-blue-500/10', 'text-blue-400', 'ring-blue-500/20', 'bg-purple-500/10', 'text-purple-400', 'ring-purple-500/20');
+      btn.classList.add('bg-white/5', 'text-gray-500', 'cursor-not-allowed');
+    });
+    if (action === 'updating') {
+      const odooBtn = updateRow.querySelector('button');
+      if (odooBtn) odooBtn.innerHTML = spinnerHTML + ' Update Odoo';
+    } else if (action === 'updating-repo') {
+      const btns = updateRow.querySelectorAll('button');
+      const codeBtn = btns.length > 1 ? btns[1] : null;
+      if (codeBtn) codeBtn.innerHTML = spinnerHTML + ' Update Repositories';
+    }
   }
 
   // Safety net: if the card is not rebuilt within 60s (e.g. dropped SSE
@@ -515,32 +573,83 @@ document.addEventListener('keydown', (e) => {
 // ── Config Editor Modal ────────────────────────────────────────────────
 
 let _configProjectId = null;
+let _configOdooVersion = '';
 
 window.showConfigModal = async function(id) {
   _configProjectId = id;
+  _configOdooVersion = '';
   const modal = document.getElementById('configModal');
   const loading = document.getElementById('configLoading');
   const editor = document.getElementById('configEditor');
   const errorEl = document.getElementById('configError');
+  const repoInput = document.getElementById('repoUrlInput');
+  const repoError = document.getElementById('repoUrlError');
+  const repoSuccess = document.getElementById('repoUrlSuccess');
 
   // Reset state
   editor.classList.add('hidden');
   editor.value = '';
   errorEl.classList.add('hidden');
   errorEl.textContent = '';
+  if (repoInput) repoInput.value = '';
+  if (repoError) { repoError.classList.add('hidden'); repoError.textContent = ''; }
+  if (repoSuccess) { repoSuccess.classList.add('hidden'); repoSuccess.textContent = ''; }
+  // Reset branch selector
+  const branchWrapper = document.getElementById('configBranchWrapper');
+  const branchSelect = document.getElementById('repoBranchSelect');
+  if (branchWrapper) branchWrapper.classList.add('hidden');
+  if (branchSelect) branchSelect.innerHTML = '';
+  // Reset enterprise toggle
+  _configEnterpriseEnabled = false;
+  const entToggle = document.getElementById('configEnterpriseToggle');
+  if (entToggle) { entToggle.disabled = true; _setToggleState(entToggle, false); }
+  const entWarning = document.getElementById('configEnterpriseWarning');
+  if (entWarning) { entWarning.classList.add('hidden'); entWarning.textContent = ''; }
+  // Reset design themes toggle
+  _configDesignThemesEnabled = false;
+  const dtToggle = document.getElementById('configDesignThemesToggle');
+  if (dtToggle) { dtToggle.disabled = true; _setToggleState(dtToggle, false); }
+  const dtWarning = document.getElementById('configDesignThemesWarning');
+  if (dtWarning) { dtWarning.classList.add('hidden'); dtWarning.textContent = ''; }
   loading.classList.remove('hidden');
   modal.classList.remove('hidden');
 
   try {
-    const resp = await fetch(`/api/projects/${id}/config`);
-    if (!resp.ok) {
-      const text = await resp.text();
+    // Load odoo.conf, project data, enterprise access, and design themes access in parallel
+    const [configResp, projectResp, entAccess, dtAccess] = await Promise.all([
+      fetch(`/api/projects/${id}/config`),
+      fetch(`/api/projects/${id}`),
+      _checkEnterpriseAccess(false),
+      _checkDesignThemesAccess(false),
+    ]);
+    if (!configResp.ok) {
+      const text = await configResp.text();
       throw new Error(text.trim() || 'Failed to load config');
     }
-    const data = await resp.json();
-    editor.value = data.content || '';
+    const configData = await configResp.json();
+    editor.value = configData.content || '';
     loading.classList.add('hidden');
     editor.classList.remove('hidden');
+
+    // Load repo URL and branch from project data
+    if (projectResp.ok && repoInput) {
+      const project = await projectResp.json();
+      _configOdooVersion = project.odoo_version || '';
+      repoInput.value = project.git_repo_url || '';
+      // If there's a repo URL, fetch branches and select the saved branch
+      if (project.git_repo_url) {
+        await _populateBranchSelect(
+          'repoBranchSelect', 'configBranchWrapper', 'configBranchHint',
+          project.git_repo_url, _configOdooVersion, project.git_repo_branch
+        );
+      }
+      // Set enterprise toggle state
+      _configEnterpriseEnabled = !!project.enterprise_enabled;
+      _applyEnterpriseAccess('configEnterpriseToggle', 'configEnterpriseWarning', entAccess, _configEnterpriseEnabled);
+      // Set design themes toggle state
+      _configDesignThemesEnabled = !!project.design_themes_enabled;
+      _applyDesignThemesAccess('configDesignThemesToggle', 'configDesignThemesWarning', dtAccess, _configDesignThemesEnabled);
+    }
   } catch (err) {
     loading.classList.add('hidden');
     errorEl.textContent = err.message;
@@ -559,19 +668,53 @@ async function saveConfig() {
   const editor = document.getElementById('configEditor');
   const errorEl = document.getElementById('configError');
   const saveBtn = document.getElementById('configModalSave');
+  const saveRestartBtn = document.getElementById('configModalSaveRestart');
+  const repoInput = document.getElementById('repoUrlInput');
+  const repoError = document.getElementById('repoUrlError');
+  const repoSuccess = document.getElementById('repoUrlSuccess');
 
   errorEl.classList.add('hidden');
+  if (repoError) { repoError.classList.add('hidden'); repoError.textContent = ''; }
+  if (repoSuccess) { repoSuccess.classList.add('hidden'); repoSuccess.textContent = ''; }
   saveBtn.disabled = true;
   saveBtn.textContent = 'Saving…';
+  if (saveRestartBtn) saveRestartBtn.disabled = true;
 
   try {
-    const resp = await fetch(`/api/projects/${_configProjectId}/config`, {
+    // 1. Save repo URL first (includes validation)
+    const repoUrl = repoInput ? repoInput.value.trim() : '';
+    const branchSelect = document.getElementById('repoBranchSelect');
+    const repoBranch = branchSelect ? branchSelect.value : '';
+    if (repoUrl) {
+      // Client-side format check
+      if (!repoUrl.startsWith('https://') || !repoUrl.endsWith('.git')) {
+        throw new Error('Repository URL must start with https:// and end with .git');
+      }
+    }
+
+    const repoResp = await fetch(`/api/projects/${_configProjectId}/repo`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ git_repo_url: repoUrl, git_repo_branch: repoBranch, enterprise_enabled: _configEnterpriseEnabled, design_themes_enabled: _configDesignThemesEnabled }),
+    });
+    if (!repoResp.ok) {
+      const data = await repoResp.json().catch(() => null);
+      const msg = data && data.error ? data.error : 'Failed to save repository URL';
+      if (repoError) {
+        repoError.textContent = msg;
+        repoError.classList.remove('hidden');
+      }
+      throw new Error(msg);
+    }
+
+    // 2. Save odoo.conf
+    const configResp = await fetch(`/api/projects/${_configProjectId}/config`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: editor.value }),
     });
-    if (!resp.ok) {
-      const text = await resp.text();
+    if (!configResp.ok) {
+      const text = await configResp.text();
       throw new Error(text.trim() || 'Failed to save config');
     }
     showNotification('Configuration saved. Restart the project for changes to take effect.', 'success');
@@ -582,6 +725,79 @@ async function saveConfig() {
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Save';
+    if (saveRestartBtn) saveRestartBtn.disabled = false;
+  }
+}
+
+async function saveAndRestartConfig() {
+  if (!_configProjectId) return;
+  const editor = document.getElementById('configEditor');
+  const errorEl = document.getElementById('configError');
+  const saveBtn = document.getElementById('configModalSave');
+  const saveRestartBtn = document.getElementById('configModalSaveRestart');
+  const repoInput = document.getElementById('repoUrlInput');
+  const repoError = document.getElementById('repoUrlError');
+  const repoSuccess = document.getElementById('repoUrlSuccess');
+
+  errorEl.classList.add('hidden');
+  if (repoError) { repoError.classList.add('hidden'); repoError.textContent = ''; }
+  if (repoSuccess) { repoSuccess.classList.add('hidden'); repoSuccess.textContent = ''; }
+  if (saveRestartBtn) { saveRestartBtn.disabled = true; saveRestartBtn.innerHTML = '<svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Saving…'; }
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    // 1. Save repo URL first (includes validation)
+    const repoUrl = repoInput ? repoInput.value.trim() : '';
+    const branchSelect = document.getElementById('repoBranchSelect');
+    const repoBranch = branchSelect ? branchSelect.value : '';
+    if (repoUrl) {
+      if (!repoUrl.startsWith('https://') || !repoUrl.endsWith('.git')) {
+        throw new Error('Repository URL must start with https:// and end with .git');
+      }
+    }
+
+    const repoResp = await fetch(`/api/projects/${_configProjectId}/repo`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ git_repo_url: repoUrl, git_repo_branch: repoBranch, enterprise_enabled: _configEnterpriseEnabled, design_themes_enabled: _configDesignThemesEnabled }),
+    });
+    if (!repoResp.ok) {
+      const data = await repoResp.json().catch(() => null);
+      const msg = data && data.error ? data.error : 'Failed to save repository URL';
+      if (repoError) { repoError.textContent = msg; repoError.classList.remove('hidden'); }
+      throw new Error(msg);
+    }
+
+    // 2. Save odoo.conf
+    const configResp = await fetch(`/api/projects/${_configProjectId}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editor.value }),
+    });
+    if (!configResp.ok) {
+      const text = await configResp.text();
+      throw new Error(text.trim() || 'Failed to save config');
+    }
+
+    // 3. Restart Odoo container
+    if (saveRestartBtn) saveRestartBtn.innerHTML = '<svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Restarting…';
+    const restartResp = await fetch(`/api/projects/${_configProjectId}/restart-odoo`, { method: 'POST' });
+    if (!restartResp.ok) {
+      const text = await restartResp.text();
+      throw new Error(text.trim() || 'Failed to restart Odoo');
+    }
+
+    showNotification('Configuration saved and Odoo restarted.', 'success');
+    hideConfigModal();
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+    if (saveRestartBtn) {
+      saveRestartBtn.disabled = false;
+      saveRestartBtn.innerHTML = '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.016 4.356v4.992"/></svg> Save &amp; Restart';
+    }
   }
 }
 
@@ -591,12 +807,47 @@ function showCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.remove('hidden');
   updatePgvectorHint();
+  // Reset enterprise toggle and check access
+  const createToggle = document.getElementById('createEnterpriseToggle');
+  const createHidden = document.getElementById('createEnterpriseValue');
+  if (createToggle) { createToggle.disabled = true; _setToggleState(createToggle, false); }
+  if (createHidden) createHidden.value = 'false';
+  _checkEnterpriseAccess(false).then(access => {
+    _applyEnterpriseAccess('createEnterpriseToggle', 'createEnterpriseWarning', access, false);
+  });
+  // Reset design themes toggle and check access
+  const createDtToggle = document.getElementById('createDesignThemesToggle');
+  const createDtHidden = document.getElementById('createDesignThemesValue');
+  if (createDtToggle) { createDtToggle.disabled = true; _setToggleState(createDtToggle, false); }
+  if (createDtHidden) createDtHidden.value = 'false';
+  _checkDesignThemesAccess(false).then(access => {
+    _applyDesignThemesAccess('createDesignThemesToggle', 'createDesignThemesWarning', access, false);
+  });
 }
 
 function hideCreateProjectModal() {
   const modal = document.getElementById('createProjectModal');
   modal.classList.add('hidden');
   document.getElementById('createProjectForm').reset();
+  // Reset branch selector
+  const bw = document.getElementById('createBranchWrapper');
+  if (bw) bw.classList.add('hidden');
+  const bs = document.getElementById('projectBranch');
+  if (bs) bs.innerHTML = '';
+  // Reset enterprise toggle
+  const et = document.getElementById('createEnterpriseToggle');
+  if (et) { et.disabled = true; _setToggleState(et, false); }
+  const ev = document.getElementById('createEnterpriseValue');
+  if (ev) ev.value = 'false';
+  const ew = document.getElementById('createEnterpriseWarning');
+  if (ew) { ew.classList.add('hidden'); ew.textContent = ''; }
+  // Reset design themes toggle
+  const dt = document.getElementById('createDesignThemesToggle');
+  if (dt) { dt.disabled = true; _setToggleState(dt, false); }
+  const dv = document.getElementById('createDesignThemesValue');
+  if (dv) dv.value = 'false';
+  const dw = document.getElementById('createDesignThemesWarning');
+  if (dw) { dw.classList.add('hidden'); dw.textContent = ''; }
   updatePgvectorHint();
 }
 
@@ -620,12 +871,22 @@ async function createProject(event) {
   const form = event.target;
   const formData = new FormData(form);
 
+  const repoUrl = (formData.get('git_repo_url') || '').trim();
+  if (repoUrl && (!repoUrl.startsWith('https://') || !repoUrl.endsWith('.git'))) {
+    showNotification('Repository URL must start with https:// and end with .git', 'error');
+    return;
+  }
+
   const project = {
     name: formData.get('name'),
     description: formData.get('description'),
     odoo_version: formData.get('odoo_version'),
     postgres_version: formData.get('postgres_version'),
-    port: parseInt(formData.get('port'))
+    port: parseInt(formData.get('port')),
+    git_repo_url: repoUrl,
+    git_repo_branch: (formData.get('git_repo_branch') || '').trim(),
+    enterprise_enabled: formData.get('enterprise_enabled') === 'true',
+    design_themes_enabled: formData.get('design_themes_enabled') === 'true'
   };
 
   try {
@@ -720,6 +981,38 @@ window.deleteProject = async function(id) {
     }
   } catch (error) {
     showNotification('Error deleting project: ' + error.message, 'error');
+    setButtonLoading(button, false);
+  }
+};
+
+window.updateOdoo = async function(id) {
+  const button = event.currentTarget;
+  setButtonLoading(button, true);
+  try {
+    const response = await fetch(`/api/projects/${id}/update-odoo`, { method: 'PUT' });
+    if (!response.ok) {
+      const error = await response.text();
+      showNotification('Failed to update Odoo: ' + error, 'error');
+      setButtonLoading(button, false);
+    }
+  } catch (error) {
+    showNotification('Error updating Odoo: ' + error.message, 'error');
+    setButtonLoading(button, false);
+  }
+};
+
+window.updateRepoCode = async function(id) {
+  const button = event.currentTarget;
+  setButtonLoading(button, true);
+  try {
+    const response = await fetch(`/api/projects/${id}/update-repo`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.text();
+      showNotification('Failed to update repositories: ' + error, 'error');
+      setButtonLoading(button, false);
+    }
+  } catch (error) {
+    showNotification('Error updating repositories: ' + error.message, 'error');
     setButtonLoading(button, false);
   }
 };
@@ -1089,6 +1382,9 @@ function initCurrentPage() {
   if (path === '/maintenance') {
     initMaintenancePage();
   }
+  if (path === '/configuration') {
+    initConfigurationPage();
+  }
 }
 
 // Intercept SPA nav link clicks (event delegation on document)
@@ -1365,6 +1661,418 @@ window.cleanOrphaned = async function(kind) {
 function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+
+// ── Branch selection helpers ──────────────────────────────────────────
+
+// Shared helper: fetch branches for a repo URL and populate a <select>.
+// selectId, wrapperId, hintId → DOM element IDs for the branch UI.
+// repoUrl → the git URL to query.
+// odooVersion → used to pick a default branch (e.g. "18.0").
+// currentBranch → previously saved branch to pre-select (optional).
+async function _populateBranchSelect(selectId, wrapperId, hintId, repoUrl, odooVersion, currentBranch) {
+  const select = document.getElementById(selectId);
+  const wrapper = document.getElementById(wrapperId);
+  const hint = document.getElementById(hintId);
+  if (!select || !wrapper) return;
+
+  select.innerHTML = '<option value="">Loading branches…</option>';
+  wrapper.classList.remove('hidden');
+
+  try {
+    const resp = await fetch(`/api/repo/branches?url=${encodeURIComponent(repoUrl)}`);
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => null);
+      const msg = data && data.error ? data.error : 'Failed to load branches';
+      select.innerHTML = `<option value="">${msg}</option>`;
+      return;
+    }
+
+    const branches = await resp.json();
+    if (!branches || branches.length === 0) {
+      select.innerHTML = '<option value="">No branches found</option>';
+      return;
+    }
+
+    select.innerHTML = '';
+    let defaultBranch = currentBranch || '';
+    let hasVersionBranch = false;
+
+    // Check if a branch matching the Odoo version exists
+    if (!defaultBranch && odooVersion) {
+      hasVersionBranch = branches.includes(odooVersion);
+      if (hasVersionBranch) {
+        defaultBranch = odooVersion;
+      }
+    }
+
+    branches.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b;
+      opt.textContent = b;
+      if (b === defaultBranch) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    if (hint) {
+      if (hasVersionBranch && !currentBranch) {
+        hint.textContent = `Auto-selected branch "${odooVersion}" to match the Odoo version.`;
+      } else {
+        hint.textContent = '';
+      }
+    }
+  } catch (err) {
+    select.innerHTML = `<option value="">Error: ${err.message}</option>`;
+  }
+}
+
+// Called on blur of the repo URL input in the Create Project modal.
+window.fetchCreateBranches = async function() {
+  const urlInput = document.getElementById('projectRepoUrl');
+  const url = urlInput ? urlInput.value.trim() : '';
+  const wrapper = document.getElementById('createBranchWrapper');
+  const select = document.getElementById('projectBranch');
+
+  if (!url || !url.startsWith('https://') || !url.endsWith('.git')) {
+    if (wrapper) wrapper.classList.add('hidden');
+    if (select) select.innerHTML = '';
+    return;
+  }
+
+  const odooVersion = document.getElementById('odooVersion')?.value || '';
+  await _populateBranchSelect('projectBranch', 'createBranchWrapper', 'createBranchHint', url, odooVersion, '');
+};
+
+// Called on blur of the repo URL input in the Config modal.
+window.fetchConfigBranches = async function() {
+  const urlInput = document.getElementById('repoUrlInput');
+  const url = urlInput ? urlInput.value.trim() : '';
+  const wrapper = document.getElementById('configBranchWrapper');
+  const select = document.getElementById('repoBranchSelect');
+
+  if (!url || !url.startsWith('https://') || !url.endsWith('.git')) {
+    if (wrapper) wrapper.classList.add('hidden');
+    if (select) select.innerHTML = '';
+    return;
+  }
+
+  // Use the stored odoo version from the project data
+  await _populateBranchSelect('repoBranchSelect', 'configBranchWrapper', 'configBranchHint', url, _configOdooVersion, '');
+};
+
+// ── Enterprise toggle helpers ─────────────────────────────────────────
+
+// Cached enterprise access result (null = not checked, true/false = result)
+let _enterpriseAccessible = null;
+let _enterpriseAccessError = '';
+
+// Check if the PAT token has enterprise access. Caches the result.
+async function _checkEnterpriseAccess(forceRefresh) {
+  if (_enterpriseAccessible !== null && !forceRefresh) {
+    return { accessible: _enterpriseAccessible, error: _enterpriseAccessError };
+  }
+  try {
+    const resp = await fetch('/api/enterprise/check-access');
+    if (!resp.ok) {
+      _enterpriseAccessible = false;
+      _enterpriseAccessError = 'Failed to check enterprise access';
+      return { accessible: false, error: _enterpriseAccessError };
+    }
+    const data = await resp.json();
+    _enterpriseAccessible = !!data.accessible;
+    _enterpriseAccessError = data.error || '';
+    return { accessible: _enterpriseAccessible, error: _enterpriseAccessError };
+  } catch (err) {
+    _enterpriseAccessible = false;
+    _enterpriseAccessError = err.message;
+    return { accessible: false, error: _enterpriseAccessError };
+  }
+}
+
+// Update a toggle switch's visual appearance
+function _setToggleState(toggleEl, enabled) {
+  if (!toggleEl) return;
+  const knob = toggleEl.querySelector('span');
+  if (enabled) {
+    toggleEl.classList.remove('bg-gray-700');
+    toggleEl.classList.add('bg-indigo-600');
+    toggleEl.setAttribute('aria-checked', 'true');
+    if (knob) { knob.classList.remove('translate-x-0'); knob.classList.add('translate-x-5'); }
+  } else {
+    toggleEl.classList.remove('bg-indigo-600');
+    toggleEl.classList.add('bg-gray-700');
+    toggleEl.setAttribute('aria-checked', 'false');
+    if (knob) { knob.classList.remove('translate-x-5'); knob.classList.add('translate-x-0'); }
+  }
+}
+
+// Apply enterprise access result to a toggle + warning element
+function _applyEnterpriseAccess(toggleId, warningId, access, currentlyEnabled) {
+  const toggle = document.getElementById(toggleId);
+  const warning = document.getElementById(warningId);
+  if (!toggle) return;
+
+  if (access.accessible) {
+    toggle.disabled = false;
+    if (warning) { warning.classList.add('hidden'); warning.textContent = ''; }
+    _setToggleState(toggle, currentlyEnabled);
+  } else {
+    toggle.disabled = true;
+    _setToggleState(toggle, false);
+    if (warning) {
+      warning.textContent = access.error || 'Enterprise access not available.';
+      warning.classList.remove('hidden');
+    }
+  }
+}
+
+// Toggle handler for create modal
+window.toggleCreateEnterprise = function() {
+  const toggle = document.getElementById('createEnterpriseToggle');
+  const hidden = document.getElementById('createEnterpriseValue');
+  if (!toggle || toggle.disabled) return;
+  const current = toggle.getAttribute('aria-checked') === 'true';
+  const next = !current;
+  _setToggleState(toggle, next);
+  if (hidden) hidden.value = next ? 'true' : 'false';
+};
+
+// Toggle handler for config modal
+let _configEnterpriseEnabled = false;
+window.toggleConfigEnterprise = function() {
+  const toggle = document.getElementById('configEnterpriseToggle');
+  if (!toggle || toggle.disabled) return;
+  _configEnterpriseEnabled = !_configEnterpriseEnabled;
+  _setToggleState(toggle, _configEnterpriseEnabled);
+};
+
+// ── Design Themes toggle helpers ──────────────────────────────────────
+
+// Cached design themes access result (null = not checked, true/false = result)
+let _designThemesAccessible = null;
+let _designThemesAccessError = '';
+
+// Check if the PAT token has design themes access. Caches the result.
+async function _checkDesignThemesAccess(forceRefresh) {
+  if (_designThemesAccessible !== null && !forceRefresh) {
+    return { accessible: _designThemesAccessible, error: _designThemesAccessError };
+  }
+  try {
+    const resp = await fetch('/api/design-themes/check-access');
+    if (!resp.ok) {
+      _designThemesAccessible = false;
+      _designThemesAccessError = 'Failed to check design themes access';
+      return { accessible: false, error: _designThemesAccessError };
+    }
+    const data = await resp.json();
+    _designThemesAccessible = !!data.accessible;
+    _designThemesAccessError = data.error || '';
+    return { accessible: _designThemesAccessible, error: _designThemesAccessError };
+  } catch (err) {
+    _designThemesAccessible = false;
+    _designThemesAccessError = err.message;
+    return { accessible: false, error: _designThemesAccessError };
+  }
+}
+
+// Apply design themes access result to a toggle + warning element
+function _applyDesignThemesAccess(toggleId, warningId, access, currentlyEnabled) {
+  const toggle = document.getElementById(toggleId);
+  const warning = document.getElementById(warningId);
+  if (!toggle) return;
+
+  if (access.accessible) {
+    toggle.disabled = false;
+    if (warning) { warning.classList.add('hidden'); warning.textContent = ''; }
+    _setToggleState(toggle, currentlyEnabled);
+  } else {
+    toggle.disabled = true;
+    _setToggleState(toggle, false);
+    if (warning) {
+      warning.textContent = access.error || 'Design Themes access not available.';
+      warning.classList.remove('hidden');
+    }
+  }
+}
+
+// Toggle handler for create modal
+window.toggleCreateDesignThemes = function() {
+  const toggle = document.getElementById('createDesignThemesToggle');
+  const hidden = document.getElementById('createDesignThemesValue');
+  if (!toggle || toggle.disabled) return;
+  const current = toggle.getAttribute('aria-checked') === 'true';
+  const next = !current;
+  _setToggleState(toggle, next);
+  if (hidden) hidden.value = next ? 'true' : 'false';
+};
+
+// Toggle handler for config modal
+let _configDesignThemesEnabled = false;
+window.toggleConfigDesignThemes = function() {
+  const toggle = document.getElementById('configDesignThemesToggle');
+  if (!toggle || toggle.disabled) return;
+  _configDesignThemesEnabled = !_configDesignThemesEnabled;
+  _setToggleState(toggle, _configDesignThemesEnabled);
+};
+
+// ── Configuration Page ─────────────────────────────────────────────────
+
+async function initConfigurationPage() {
+  const tokenInput = document.getElementById('patTokenInput');
+  const currentVal = document.getElementById('patCurrentValue');
+  if (!tokenInput) return;
+
+  // Load current masked PAT value and validity
+  try {
+    const resp = await fetch('/api/settings');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.github_pat) {
+        currentVal.textContent = 'Current: ' + data.github_pat;
+      } else {
+        currentVal.textContent = 'No token configured';
+      }
+      updatePatBadge(data.github_pat_valid, !!data.github_pat);
+    }
+  } catch (err) {
+    console.error('Failed to load settings:', err);
+  }
+}
+
+function updatePatBadge(validStr, hasToken) {
+  const badge = document.getElementById('patStatusBadge');
+  if (!badge) return;
+  if (!hasToken) {
+    badge.classList.add('hidden');
+    return;
+  }
+  badge.classList.remove('hidden');
+  if (validStr === 'true') {
+    badge.className = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-green-400/10 text-green-400 ring-green-400/20';
+    badge.textContent = 'VALID';
+  } else if (validStr === 'false') {
+    badge.className = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-red-400/10 text-red-400 ring-red-400/20';
+    badge.textContent = 'INVALID';
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+window.togglePatVisibility = function() {
+  const input = document.getElementById('patTokenInput');
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+};
+
+window.savePatToken = async function() {
+  const input = document.getElementById('patTokenInput');
+  const errorEl = document.getElementById('patError');
+  const successEl = document.getElementById('patSuccess');
+  const saveBtn = document.getElementById('patSaveBtn');
+  const currentVal = document.getElementById('patCurrentValue');
+
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
+
+  const token = input.value.trim();
+  if (!token) {
+    errorEl.textContent = 'Please enter a token';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+
+  try {
+    // Validate first
+    const valResp = await fetch('/api/settings/validate-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!valResp.ok) {
+      const data = await valResp.json().catch(() => null);
+      const msg = data && data.error ? data.error : 'Token validation failed';
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+      return;
+    }
+
+    // Save
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ github_pat: token }),
+    });
+    if (!resp.ok) {
+      throw new Error('Failed to save token');
+    }
+
+    input.value = '';
+    input.type = 'password';
+    successEl.textContent = 'Token saved and validated successfully';
+    successEl.classList.remove('hidden');
+
+    // Invalidate enterprise access cache since token changed
+    _enterpriseAccessible = null;
+    _enterpriseAccessError = '';
+    // Invalidate design themes access cache since token changed
+    _designThemesAccessible = null;
+    _designThemesAccessError = '';
+
+    // Refresh masked display
+    const settResp = await fetch('/api/settings');
+    if (settResp.ok) {
+      const data = await settResp.json();
+      currentVal.textContent = data.github_pat ? 'Current: ' + data.github_pat : 'No token configured';
+      updatePatBadge(data.github_pat_valid, !!data.github_pat);
+    }
+
+    showNotification('GitHub PAT saved successfully', 'success');
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save Token';
+  }
+};
+
+window.validatePatToken = async function() {
+  const input = document.getElementById('patTokenInput');
+  const errorEl = document.getElementById('patError');
+  const successEl = document.getElementById('patSuccess');
+  const validateBtn = document.getElementById('patValidateBtn');
+
+  errorEl.classList.add('hidden');
+  successEl.classList.add('hidden');
+  validateBtn.disabled = true;
+  validateBtn.textContent = 'Validating…';
+
+  try {
+    const token = input.value.trim();
+    const resp = await fetch('/api/settings/validate-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token || '' }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => null);
+      const msg = data && data.error ? data.error : 'Validation failed';
+      errorEl.textContent = msg;
+      errorEl.classList.remove('hidden');
+      return;
+    }
+    successEl.textContent = 'Token is valid';
+    successEl.classList.remove('hidden');
+  } catch (err) {
+    errorEl.textContent = err.message;
+    errorEl.classList.remove('hidden');
+  } finally {
+    validateBtn.disabled = false;
+    validateBtn.textContent = 'Validate';
+  }
+};
 
 // ── Keyboard handler ──────────────────────────────────────────────────
 

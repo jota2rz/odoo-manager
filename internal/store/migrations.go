@@ -75,6 +75,48 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     3,
+		description: "add git_repo_url column and settings table",
+		up: func(tx *sql.Tx) error {
+			if _, err := tx.Exec(`ALTER TABLE projects ADD COLUMN git_repo_url TEXT NOT NULL DEFAULT ''`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`
+				CREATE TABLE IF NOT EXISTS settings (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL DEFAULT ''
+				)
+			`); err != nil {
+				return err
+			}
+			return nil
+		},
+	},
+	{
+		version:     4,
+		description: "add git_repo_branch column",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE projects ADD COLUMN git_repo_branch TEXT NOT NULL DEFAULT ''`)
+			return err
+		},
+	},
+	{
+		version:     5,
+		description: "add enterprise_enabled column",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE projects ADD COLUMN enterprise_enabled INTEGER NOT NULL DEFAULT 0`)
+			return err
+		},
+	},
+	{
+		version:     6,
+		description: "add design_themes_enabled column",
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE projects ADD COLUMN design_themes_enabled INTEGER NOT NULL DEFAULT 0`)
+			return err
+		},
+	},
 }
 
 // getSchemaVersion returns the current schema version using SQLite's built-in user_version pragma.

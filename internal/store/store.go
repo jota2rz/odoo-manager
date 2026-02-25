@@ -11,15 +11,19 @@ import (
 
 // Project represents an Odoo project configuration
 type Project struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description"`
-	OdooVersion     string    `json:"odoo_version"`
-	PostgresVersion string    `json:"postgres_version"`
-	Port            int       `json:"port"`
-	Status          string    `json:"status"` // running, stopped, error
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	Description         string    `json:"description"`
+	OdooVersion         string    `json:"odoo_version"`
+	PostgresVersion     string    `json:"postgres_version"`
+	Port                int       `json:"port"`
+	Status              string    `json:"status"` // running, stopped, error
+	GitRepoURL          string    `json:"git_repo_url"`
+	GitRepoBranch       string    `json:"git_repo_branch"`
+	EnterpriseEnabled   bool      `json:"enterprise_enabled"`
+	DesignThemesEnabled bool      `json:"design_themes_enabled"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // ProjectStore manages projects persistence using SQLite
@@ -76,10 +80,10 @@ func (s *ProjectStore) Create(project *Project) error {
 	project.UpdatedAt = now
 
 	_, err := s.db.Exec(
-		`INSERT INTO projects (id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO projects (id, name, description, odoo_version, postgres_version, port, status, git_repo_url, git_repo_branch, enterprise_enabled, design_themes_enabled, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		project.ID, project.Name, project.Description, project.OdooVersion,
-		project.PostgresVersion, project.Port, project.Status, project.CreatedAt, project.UpdatedAt,
+		project.PostgresVersion, project.Port, project.Status, project.GitRepoURL, project.GitRepoBranch, project.EnterpriseEnabled, project.DesignThemesEnabled, project.CreatedAt, project.UpdatedAt,
 	)
 	return err
 }
@@ -88,10 +92,10 @@ func (s *ProjectStore) Create(project *Project) error {
 func (s *ProjectStore) Get(id string) (*Project, bool) {
 	p := &Project{}
 	err := s.db.QueryRow(
-		`SELECT id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at
+		`SELECT id, name, description, odoo_version, postgres_version, port, status, git_repo_url, git_repo_branch, enterprise_enabled, design_themes_enabled, created_at, updated_at
 		 FROM projects WHERE id = ?`, id,
 	).Scan(&p.ID, &p.Name, &p.Description, &p.OdooVersion, &p.PostgresVersion,
-		&p.Port, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		&p.Port, &p.Status, &p.GitRepoURL, &p.GitRepoBranch, &p.EnterpriseEnabled, &p.DesignThemesEnabled, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, false
 	}
@@ -101,7 +105,7 @@ func (s *ProjectStore) Get(id string) (*Project, bool) {
 // List returns all projects
 func (s *ProjectStore) List() []*Project {
 	rows, err := s.db.Query(
-		`SELECT id, name, description, odoo_version, postgres_version, port, status, created_at, updated_at
+		`SELECT id, name, description, odoo_version, postgres_version, port, status, git_repo_url, git_repo_branch, enterprise_enabled, design_themes_enabled, created_at, updated_at
 		 FROM projects ORDER BY created_at DESC`)
 	if err != nil {
 		return nil
@@ -112,7 +116,7 @@ func (s *ProjectStore) List() []*Project {
 	for rows.Next() {
 		p := &Project{}
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.OdooVersion, &p.PostgresVersion,
-			&p.Port, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.Port, &p.Status, &p.GitRepoURL, &p.GitRepoBranch, &p.EnterpriseEnabled, &p.DesignThemesEnabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			continue
 		}
 		projects = append(projects, p)
@@ -125,10 +129,10 @@ func (s *ProjectStore) Update(project *Project) error {
 	project.UpdatedAt = time.Now()
 
 	result, err := s.db.Exec(
-		`UPDATE projects SET name=?, description=?, odoo_version=?, postgres_version=?, port=?, status=?, updated_at=?
+		`UPDATE projects SET name=?, description=?, odoo_version=?, postgres_version=?, port=?, status=?, git_repo_url=?, git_repo_branch=?, enterprise_enabled=?, design_themes_enabled=?, updated_at=?
 		 WHERE id=?`,
 		project.Name, project.Description, project.OdooVersion, project.PostgresVersion,
-		project.Port, project.Status, project.UpdatedAt, project.ID,
+		project.Port, project.Status, project.GitRepoURL, project.GitRepoBranch, project.EnterpriseEnabled, project.DesignThemesEnabled, project.UpdatedAt, project.ID,
 	)
 	if err != nil {
 		return err
@@ -165,4 +169,35 @@ func (s *ProjectStore) PortExists(port int, excludeID string) bool {
 		s.db.QueryRow(`SELECT COUNT(*) FROM projects WHERE port = ?`, port).Scan(&count)
 	}
 	return count > 0
+}
+
+// ReconcileStaleStatuses resets any projects stuck in transient statuses
+// (creating, starting, stopping, deleting, updating, updating-repo) to "error".
+// This handles cases where the server was stopped/crashed while a background
+// operation was in progress.
+func (s *ProjectStore) ReconcileStaleStatuses() (int64, error) {
+	result, err := s.db.Exec(
+		`UPDATE projects SET status = 'error' WHERE status IN ('creating', 'starting', 'stopping', 'deleting', 'updating', 'updating-repo')`,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// GetSetting retrieves a setting value by key. Returns empty string if not found.
+func (s *ProjectStore) GetSetting(key string) string {
+	var value string
+	s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	return value
+}
+
+// SetSetting creates or updates a setting.
+func (s *ProjectStore) SetSetting(key, value string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key, value,
+	)
+	return err
 }

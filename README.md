@@ -18,17 +18,26 @@ A modern web application for managing Odoo and PostgreSQL Docker containers loca
 - 🩺 **Docker Health Check** - Continuous monitoring of Docker daemon connectivity with automatic UI overlay
 - 🔗 **Connection Recovery** - Automatic SSE reconnection with version-based reload and full-screen overlay
 - 🌈 **ANSI Color Support** - Terminal colors rendered faithfully in log viewers
+- 🔀 **GitHub Repository Integration** - Clone and mount custom addons repos with branch selection
+- 🏢 **Enterprise & Design Themes** - One-toggle support for Odoo Enterprise and Design Themes addons via GitHub PAT
+- 🔑 **PAT Validation** - GitHub Personal Access Token validation at startup with status badge in Configuration
+- ⬆️ **Update Odoo** - Pull the latest Odoo Docker image and recreate the container while preserving data volumes
+- 🔃 **Update Repositories** - Git-pull all configured repos (addons, Enterprise, Design Themes) with smart restart (skips if dev mode is active)
+- ⚙️ **Per-Project Configuration** - Edit `odoo.conf` and repository settings per project with Save & Restart support
+- 📦 **Auto pip Install** - Automatically installs Python dependencies from `requirements.txt` in the addons repo on container start
+- 🪟 **Portable Git (Windows)** - Auto-downloads MinGit on Windows; shows a dashboard warning with install link on macOS/Linux
+- 🧹 **Maintenance Tools** - Clean orphaned Docker containers, volumes, networks, and images
 - 🌐 **Reverse Proxy Aware** - Client IP detection via `X-Forwarded-For` and `X-Real-Ip` headers
 - ⚡ **Fast & Lightweight** - Minimal dependencies, quick startup
 
 ## Prerequisites
 
 - **Docker** (with Docker daemon running)
+- **Git** (optional, for repository features — auto-downloaded as MinGit on Windows; install from [git-scm.com](https://git-scm.com/) on macOS/Linux)
 
 To build from source you also need:
 
 - **Go** 1.24 or higher
-- **Git** (for cloning the repository)
 
 ## Installation
 
@@ -116,6 +125,9 @@ The application will start on `http://localhost:8080`
 - **Open**: Click "Open" to access the running Odoo instance (visible only when running)
 - **Backup**: Click the database icon to back up a database (visible only when running)
 - **View Logs**: Click the document icon to stream real-time container logs
+- **Update Odoo**: Pull the latest Odoo Docker image and recreate the container (data volumes are preserved)
+- **Update Repositories**: Git-pull all configured repos (custom addons, Enterprise, Design Themes); restarts Odoo unless dev mode is active
+- **Configure**: Click the gear icon to edit `odoo.conf`, change the GitHub repository/branch, and toggle Enterprise or Design Themes. Use "Save & Restart" to apply changes that require a container restart
 - **Delete**: Click the trash icon to remove the project and its containers
 
 All actions are asynchronous and reflected in real time across every open browser tab via SSE. Start, stop, and delete operations return immediately while Docker work runs in the background.
@@ -143,6 +155,14 @@ All actions are asynchronous and reflected in real time across every open browse
 4. Scroll up to load older log entries (100 lines per page)
 5. Audit entries are also written to `data/audit.log` and the server console
 
+### GitHub Repository & Addons
+
+1. When creating a project, optionally provide a **GitHub repository URL** — it will be cloned and bind-mounted at `/mnt/extra-addons`
+2. Enable official **Enterprise** and/or **Design Themes** repositories toggles (`odoo/enterprise` requires access to the repository with your GitHub PAT)
+3. Configure your **GitHub Personal Access Token** in the Configuration page; a green/red badge indicates its validity
+4. If the addons repo contains a `requirements.txt` file, Python dependencies are automatically installed via `pip` on every container start
+5. Use **Update Repositories** on a project card to git-pull all configured repos at once
+
 ## Development
 
 ### Project Structure
@@ -164,6 +184,9 @@ odoo-manager/
 │   │   └── docker.go
 │   ├── events/              # SSE event hub (pub/sub)
 │   │   └── events.go
+│   ├── gitops/              # Git operations & portable MinGit
+│   │   ├── gitbin.go        # Git binary resolution, MinGit auto-download
+│   │   └── gitops.go        # Clone, pull, branch listing, PAT validation
 │   ├── handlers/            # HTTP handlers, routes, and SSE endpoint
 │   │   └── handlers.go
 │   └── store/               # SQLite persistence and migrations
@@ -174,7 +197,12 @@ odoo-manager/
 │       └── input.css        # Tailwind CSS source
 ├── templates/               # Templ HTML templates
 │   └── templates.templ
-├── data/                    # Runtime data (odoo-manager.db, audit.log, backups/)
+├── data/                    # Runtime data (created automatically)
+│   ├── config/              # Per-project odoo.conf files
+│   ├── repos/               # Cloned Git repositories
+│   ├── backups/             # Temporary backup files
+│   ├── odoo-manager.db      # SQLite database
+│   └── audit.log            # Audit trail
 ├── .goreleaser.yml          # GoReleaser configuration
 ├── .github/
 │   └── workflows/
@@ -237,7 +265,7 @@ PORT=3000 ./odoo-manager
 
 Projects are stored in a SQLite database at `data/odoo-manager.db`. The database is created automatically on first run with WAL mode enabled for better concurrent read performance. Schema changes are applied automatically via versioned migrations (`PRAGMA user_version`). Unique constraints on project names and ports prevent duplicates. No external database server is required — everything is embedded in the single binary.
 
-Audit entries are appended to `data/audit.log` in a human-readable format. Database backups are temporarily stored in `data/backups/` and cleaned up after download.
+Audit entries are appended to `data/audit.log` in a human-readable format. Database backups are temporarily stored in `data/backups/` and cleaned up after download. Per-project `odoo.conf` files are stored in `data/config/{projectID}/` and bind-mounted into the container. Cloned Git repositories are stored in `data/repos/`.
 
 ## Docker Integration
 
@@ -323,7 +351,7 @@ make build      # Rebuild
 3. **Real-time UI**: SSE broadcasts project status changes, pending actions, backup progress, and log streams to all connected browsers instantly
 4. **Docker Native**: Direct Docker API integration with container labels and health monitoring
 5. **Auto-provisioning**: Containers are pulled and created in the background as soon as a project is created
-6. **Async Operations**: Start, stop, and delete run in background goroutines to avoid HTTP timeouts
+6. **Async Operations**: Start, stop, delete, update, and restart run in background goroutines to avoid HTTP timeouts
 7. **Database Backup**: Runs `odoo db dump` inside the container, streams progress via SSE, and copies the backup file out
 8. **Audit Trail**: Every API request is logged to file, console, and streamed live to the Audit page with client IP tracking
 9. **Connection Resilience**: SSE auto-reconnect with version-based reload, connection-lost overlay, and Docker-down overlay
@@ -331,6 +359,11 @@ make build      # Rebuild
 11. **Status Reconciliation**: Automatically corrects stale container states
 12. **Graceful Shutdown**: Proper signal handling
 13. **Cross-platform Releases**: Automated builds via GoReleaser + GitHub Actions
+14. **GitHub Integration**: Clone, pull, and branch-list operations with PAT authentication for private repos
+15. **Enterprise & Design Themes**: Toggle-based Odoo Enterprise and Design Themes support with addons_path management
+16. **Per-project Configuration**: Editable `odoo.conf` stored locally and bind-mounted into containers
+17. **Auto pip Install**: Custom entrypoint wrapper auto-installs `requirements.txt` dependencies on each container start
+18. **Portable Git**: Auto-downloads MinGit on Windows; dashboard warning with install link on macOS/Linux
 
 ## Contributing
 
@@ -370,3 +403,5 @@ For issues, questions, or contributions, please visit the [GitHub repository](ht
 ---
 
 **Made with ❤️ for the Odoo community**
+
+Built with AI-assisted development using [Claude Opus 4.6](https://www.anthropic.com/claude) by Anthropic.

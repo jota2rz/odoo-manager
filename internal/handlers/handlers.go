@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/jota2rz/odoo-manager/internal/audit"
 	"github.com/jota2rz/odoo-manager/internal/docker"
 	"github.com/jota2rz/odoo-manager/internal/events"
+	"github.com/jota2rz/odoo-manager/internal/gitops"
 	"github.com/jota2rz/odoo-manager/internal/store"
 	"github.com/jota2rz/odoo-manager/templates"
 )
@@ -37,10 +39,12 @@ type Handler struct {
 
 	dockerMu sync.RWMutex
 	dockerUp bool // last known Docker daemon reachability
+
+	gitAvailable bool // whether git CLI was found at startup
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHub *events.Hub, version string, auditLogger *audit.Logger) *Handler {
+func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHub *events.Hub, version string, auditLogger *audit.Logger, gitAvailable bool) *Handler {
 	dockerManager, err := docker.NewManager()
 	if err != nil {
 		log.Printf("Warning: Failed to create Docker manager: %v", err)
@@ -64,6 +68,7 @@ func NewHandler(projectStore *store.ProjectStore, staticFS http.Handler, eventHu
 		audit:          auditLogger,
 		backupsRunning: make(map[string]bool),
 		dockerUp:       dockerUp,
+		gitAvailable:   gitAvailable,
 	}
 }
 
@@ -178,6 +183,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/projects", h.handleProjects)
 	mux.HandleFunc("/audit", h.handleAuditPage)
 	mux.HandleFunc("/maintenance", h.handleMaintenancePage)
+	mux.HandleFunc("/configuration", h.handleConfigurationPage)
 
 	// API endpoints
 	mux.HandleFunc("/api/projects", h.withAudit(h.handleAPIProjects))
@@ -188,7 +194,18 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/projects/{id}/databases", h.withAudit(h.handleListDatabases))
 	mux.HandleFunc("/api/projects/{id}/backup", h.withAudit(h.handleBackupProject))
 	mux.HandleFunc("/api/projects/{id}/config", h.withAudit(h.handleProjectConfig))
+	mux.HandleFunc("/api/projects/{id}/repo", h.withAudit(h.handleProjectRepo))
+	mux.HandleFunc("/api/repo/branches", h.handleRepoBranches)
+	mux.HandleFunc("/api/enterprise/check-access", h.handleEnterpriseCheckAccess)
+	mux.HandleFunc("/api/design-themes/check-access", h.handleDesignThemesCheckAccess)
 	mux.HandleFunc("/api/backup/download/", h.withAudit(h.handleBackupDownload))
+	mux.HandleFunc("/api/projects/{id}/update-odoo", h.withAudit(h.handleUpdateOdoo))
+	mux.HandleFunc("/api/projects/{id}/update-repo", h.withAudit(h.handleUpdateRepos))
+	mux.HandleFunc("/api/projects/{id}/restart-odoo", h.withAudit(h.handleRestartOdoo))
+
+	// Settings endpoints
+	mux.HandleFunc("/api/settings", h.withAudit(h.handleSettings))
+	mux.HandleFunc("/api/settings/validate-token", h.withAudit(h.handleValidateToken))
 
 	// Maintenance endpoints
 	mux.HandleFunc("/api/maintenance/preview-containers", h.handlePreviewOrphaned("containers"))
@@ -252,11 +269,11 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	// SPA navigation: return only the inner content
 	if r.Header.Get("X-Spa") == "1" {
-		templates.DashboardContent(projects).Render(r.Context(), w)
+		templates.DashboardContent(projects, h.gitAvailable).Render(r.Context(), w)
 		return
 	}
 
-	component := templates.Index(projects)
+	component := templates.Index(projects, h.gitAvailable)
 	component.Render(r.Context(), w)
 }
 
@@ -318,6 +335,19 @@ func (h *Handler) handleAPIProjects(w http.ResponseWriter, r *http.Request) {
 		if h.store.PortExists(project.Port, "") {
 			http.Error(w, "A project with this port already exists", http.StatusConflict)
 			return
+		}
+
+		// Validate git repo URL if provided
+		if project.GitRepoURL != "" {
+			if err := gitops.ValidateRepoURL(project.GitRepoURL); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			token := h.store.GetSetting("github_pat")
+			if err := gitops.CheckRepoAccessible(r.Context(), project.GitRepoURL, token); err != nil {
+				http.Error(w, "Repository not accessible: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 
 		project.ID = uuid.New().String()
@@ -429,6 +459,25 @@ func (h *Handler) deleteProject(project *store.Project) {
 		}
 	}
 
+	// Clean up cloned git repo if any
+	if project.GitRepoURL != "" {
+		if err := gitops.RemoveRepo(project.ID); err != nil {
+			log.Printf("Warning: Failed to remove git repo for project %s: %v", project.ID, err)
+		}
+	}
+	// Clean up enterprise repo if any
+	if project.EnterpriseEnabled {
+		if err := gitops.RemoveEnterpriseRepo(project.ID); err != nil {
+			log.Printf("Warning: Failed to remove enterprise repo for project %s: %v", project.ID, err)
+		}
+	}
+	// Clean up design-themes repo if any
+	if project.DesignThemesEnabled {
+		if err := gitops.RemoveDesignThemesRepo(project.ID); err != nil {
+			log.Printf("Warning: Failed to remove design-themes repo for project %s: %v", project.ID, err)
+		}
+	}
+
 	if err := h.store.Delete(project.ID); err != nil {
 		log.Printf("Warning: Failed to delete project %s from store: %v", project.ID, err)
 		return
@@ -440,9 +489,86 @@ func (h *Handler) deleteProject(project *store.Project) {
 	})
 }
 
+// addonsHostDir resolves the absolute host path for a project's addons
+// bind mount. If the project has a git repo configured, it clones/pulls it
+// and returns the local directory. Otherwise returns empty string.
+func (h *Handler) addonsHostDir(ctx context.Context, projectID, repoURL, branch string) string {
+	if repoURL == "" {
+		return ""
+	}
+	token := h.store.GetSetting("github_pat")
+	dir, err := gitops.CloneOrPull(ctx, projectID, repoURL, token, branch)
+	if err != nil {
+		log.Printf("Warning: git clone/pull failed for project %s: %v", projectID, err)
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
+// enterpriseHostDir resolves the absolute host path for the Odoo Enterprise
+// addons bind mount. If enterprise is enabled, it clones/pulls the enterprise
+// repo using the project's Odoo version as the branch. Returns empty string
+// if enterprise is not enabled.
+func (h *Handler) enterpriseHostDir(ctx context.Context, projectID, odooVersion string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	token := h.store.GetSetting("github_pat")
+	dir, err := gitops.CloneOrPullEnterprise(ctx, projectID, token, odooVersion)
+	if err != nil {
+		log.Printf("Warning: enterprise clone/pull failed for project %s: %v", projectID, err)
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
+// designThemesHostDir resolves the absolute host path for the Odoo Design
+// Themes bind mount. If design themes is enabled, it clones/pulls the
+// design-themes repo using the project's Odoo version as the branch.
+// Returns empty string if design themes is not enabled.
+func (h *Handler) designThemesHostDir(ctx context.Context, projectID, odooVersion string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	token := h.store.GetSetting("github_pat")
+	dir, err := gitops.CloneOrPullDesignThemes(ctx, projectID, token, odooVersion)
+	if err != nil {
+		log.Printf("Warning: design-themes clone/pull failed for project %s: %v", projectID, err)
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	return abs
+}
+
 // createProjectContainers pulls images and creates containers for a newly created project.
 // Runs asynchronously after the create HTTP response has been sent.
 func (h *Handler) createProjectContainers(projectID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in createProjectContainers for %s: %v", projectID, r)
+			if project, ok := h.store.Get(projectID); ok {
+				project.Status = "error"
+				_ = h.store.Update(project)
+				h.events.Publish(events.Event{
+					Type:      events.ProjectStatusChanged,
+					ProjectID: project.ID,
+					Data:      project,
+				})
+			}
+		}
+	}()
+
 	project, ok := h.store.Get(projectID)
 	if !ok {
 		log.Printf("Warning: project %s not found for container creation", projectID)
@@ -467,7 +593,30 @@ func (h *Handler) createProjectContainers(projectID string) {
 		return
 	}
 
-	if err := h.dockerManager.CreateProject(context.Background(), project); err != nil {
+	// Clone git repos with a timeout so we don't hang forever
+	gitCtx, gitCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer gitCancel()
+
+	log.Printf("Project %s: resolving addons host directories...", projectID)
+
+	addonsDir := h.addonsHostDir(gitCtx, project.ID, project.GitRepoURL, project.GitRepoBranch)
+	if project.GitRepoURL != "" {
+		log.Printf("Project %s: addons repo cloned (dir=%q)", projectID, addonsDir)
+	}
+
+	entDir := h.enterpriseHostDir(gitCtx, project.ID, project.OdooVersion, project.EnterpriseEnabled)
+	if project.EnterpriseEnabled {
+		log.Printf("Project %s: enterprise repo cloned (dir=%q)", projectID, entDir)
+	}
+
+	dtDir := h.designThemesHostDir(gitCtx, project.ID, project.OdooVersion, project.DesignThemesEnabled)
+	if project.DesignThemesEnabled {
+		log.Printf("Project %s: design-themes repo cloned (dir=%q)", projectID, dtDir)
+	}
+
+	log.Printf("Project %s: creating Docker containers...", projectID)
+
+	if err := h.dockerManager.CreateProject(context.Background(), project, addonsDir, entDir, dtDir); err != nil {
 		log.Printf("Warning: Failed to create containers for project %s: %v", projectID, err)
 		project.Status = "error"
 		_ = h.store.Update(project)
@@ -484,6 +633,7 @@ func (h *Handler) createProjectContainers(projectID string) {
 		log.Printf("Warning: Failed to update project status: %v", err)
 	}
 
+	log.Printf("Project %s: containers created successfully", projectID)
 	h.events.Publish(events.Event{
 		Type:      events.ProjectStatusChanged,
 		ProjectID: project.ID,
@@ -493,13 +643,36 @@ func (h *Handler) createProjectContainers(projectID string) {
 
 // startProjectContainers starts Docker containers for a project asynchronously.
 func (h *Handler) startProjectContainers(projectID string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC in startProjectContainers for %s: %v", projectID, r)
+			if project, ok := h.store.Get(projectID); ok {
+				project.Status = "error"
+				_ = h.store.Update(project)
+				h.events.Publish(events.Event{
+					Type:      events.ProjectStatusChanged,
+					ProjectID: project.ID,
+					Data:      project,
+				})
+			}
+		}
+	}()
+
 	project, ok := h.store.Get(projectID)
 	if !ok {
 		log.Printf("Warning: project %s not found for start", projectID)
 		return
 	}
 
-	if err := h.dockerManager.StartProject(context.Background(), project); err != nil {
+	// Clone/pull git repos with a timeout
+	gitCtx, gitCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer gitCancel()
+
+	addonsDir := h.addonsHostDir(gitCtx, project.ID, project.GitRepoURL, project.GitRepoBranch)
+	entDir := h.enterpriseHostDir(gitCtx, project.ID, project.OdooVersion, project.EnterpriseEnabled)
+	dtDir := h.designThemesHostDir(gitCtx, project.ID, project.OdooVersion, project.DesignThemesEnabled)
+
+	if err := h.dockerManager.StartProject(context.Background(), project, addonsDir, entDir, dtDir); err != nil {
 		log.Printf("Warning: Failed to start containers for project %s: %v", projectID, err)
 		project.Status = "error"
 		_ = h.store.Update(project)
@@ -1289,4 +1462,557 @@ func (h *Handler) handleAuditStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// handleConfigurationPage renders the Configuration page.
+func (h *Handler) handleConfigurationPage(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Spa") == "1" {
+		templates.ConfigurationContent().Render(r.Context(), w)
+		return
+	}
+	templates.Configuration().Render(r.Context(), w)
+}
+
+// handleSettings handles GET/PUT for global settings (e.g. GitHub PAT).
+// GET  → returns { "github_pat": "<masked or empty>" }
+// PUT  → accepts { "github_pat": "<token>" } and stores it
+func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		pat := h.store.GetSetting("github_pat")
+		masked := ""
+		if pat != "" {
+			if len(pat) > 8 {
+				masked = pat[:4] + "..." + pat[len(pat)-4:]
+			} else {
+				masked = "****"
+			}
+		}
+		patValid := h.store.GetSetting("github_pat_valid")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"github_pat": masked, "github_pat_valid": patValid})
+
+	case http.MethodPut:
+		var body struct {
+			GitHubPAT string `json:"github_pat"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := h.store.SetSetting("github_pat", body.GitHubPAT); err != nil {
+			http.Error(w, "Failed to save setting: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Re-validate the new token and store result
+		if body.GitHubPAT != "" {
+			if err := gitops.ValidateToken(r.Context(), body.GitHubPAT); err != nil {
+				_ = h.store.SetSetting("github_pat_valid", "false")
+			} else {
+				_ = h.store.SetSetting("github_pat_valid", "true")
+			}
+		} else {
+			_ = h.store.SetSetting("github_pat_valid", "")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleValidateToken validates the current stored GitHub PAT token.
+// POST → tests the token against GitHub API and returns result.
+func (h *Handler) handleValidateToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Accept optional token in body; if empty, use stored token
+	var body struct {
+		Token string `json:"token"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+
+	token := body.Token
+	if token == "" {
+		token = h.store.GetSetting("github_pat")
+	}
+	if token == "" {
+		http.Error(w, "No token provided", http.StatusBadRequest)
+		return
+	}
+
+	if err := gitops.ValidateToken(r.Context(), token); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "valid"})
+}
+
+// handleProjectRepo handles PUT for a project's git repo URL and enterprise setting.
+// PUT → validates URL format, checks accessibility, and saves.
+func (h *Handler) handleProjectRepo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.PathValue("id")
+	project, ok := h.store.Get(id)
+	if !ok {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	var body struct {
+		GitRepoURL          string `json:"git_repo_url"`
+		GitRepoBranch       string `json:"git_repo_branch"`
+		EnterpriseEnabled   *bool  `json:"enterprise_enabled"`    // pointer to detect if field was sent
+		DesignThemesEnabled *bool  `json:"design_themes_enabled"` // pointer to detect if field was sent
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	previousURL := project.GitRepoURL
+	previousBranch := project.GitRepoBranch
+	previousEnterprise := project.EnterpriseEnabled
+	previousDesignThemes := project.DesignThemesEnabled
+
+	// Update enterprise flag if provided
+	if body.EnterpriseEnabled != nil {
+		project.EnterpriseEnabled = *body.EnterpriseEnabled
+	}
+	// Update design themes flag if provided
+	if body.DesignThemesEnabled != nil {
+		project.DesignThemesEnabled = *body.DesignThemesEnabled
+	}
+
+	// Allow clearing the repo URL
+	if body.GitRepoURL == "" {
+		// Remove existing clone if any
+		if previousURL != "" {
+			gitops.RemoveRepo(project.ID)
+		}
+		project.GitRepoURL = ""
+		project.GitRepoBranch = ""
+		if err := h.store.Update(project); err != nil {
+			http.Error(w, "Failed to update project: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Recreate container without the addons bind mount (enterprise/design-themes may still change)
+		if (previousURL != "" || previousEnterprise != project.EnterpriseEnabled || previousDesignThemes != project.DesignThemesEnabled) && h.dockerManager != nil {
+			entDir := h.enterpriseHostDir(r.Context(), project.ID, project.OdooVersion, project.EnterpriseEnabled)
+			dtDir := h.designThemesHostDir(r.Context(), project.ID, project.OdooVersion, project.DesignThemesEnabled)
+			if !project.EnterpriseEnabled && previousEnterprise {
+				gitops.RemoveEnterpriseRepo(project.ID)
+			}
+			if !project.DesignThemesEnabled && previousDesignThemes {
+				gitops.RemoveDesignThemesRepo(project.ID)
+			}
+			if err := h.dockerManager.RecreateOdooContainer(r.Context(), project, "", entDir, dtDir); err != nil {
+				log.Printf("Warning: failed to recreate container for project %s after clearing repo: %v", project.ID, err)
+			}
+			// Update odoo.conf addons_path: remove /mnt/extra-addons since repo was cleared
+			if previousURL != "" {
+				if err := h.dockerManager.UpdateOdooConfigExtraAddons(r.Context(), project.ID, false); err != nil {
+					log.Printf("Warning: failed to update odoo.conf extra-addons for project %s: %v", project.ID, err)
+				}
+			}
+			// Update odoo.conf addons_path when enterprise flag changes
+			if previousEnterprise != project.EnterpriseEnabled {
+				if err := h.dockerManager.UpdateOdooConfigEnterprise(r.Context(), project.ID, project.EnterpriseEnabled); err != nil {
+					log.Printf("Warning: failed to update odoo.conf addons_path for project %s: %v", project.ID, err)
+				}
+			}
+			// Update odoo.conf addons_path when design themes flag changes
+			if previousDesignThemes != project.DesignThemesEnabled {
+				if err := h.dockerManager.UpdateOdooConfigDesignThemes(r.Context(), project.ID, project.DesignThemesEnabled); err != nil {
+					log.Printf("Warning: failed to update odoo.conf design-themes for project %s: %v", project.ID, err)
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		return
+	}
+
+	// Validate URL format
+	if err := gitops.ValidateRepoURL(body.GitRepoURL); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Check repo accessibility
+	token := h.store.GetSetting("github_pat")
+	if err := gitops.CheckRepoAccessible(r.Context(), body.GitRepoURL, token); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Repository not accessible: " + err.Error()})
+		return
+	}
+
+	project.GitRepoURL = body.GitRepoURL
+	project.GitRepoBranch = body.GitRepoBranch
+	if err := h.store.Update(project); err != nil {
+		http.Error(w, "Failed to update project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// If the repo URL, branch, enterprise, or design themes flag changed, recreate the Odoo container
+	needsRecreate := previousURL != body.GitRepoURL || previousBranch != body.GitRepoBranch || previousEnterprise != project.EnterpriseEnabled || previousDesignThemes != project.DesignThemesEnabled
+	if needsRecreate && h.dockerManager != nil {
+		// Remove old clone if URL changed so we get a fresh checkout
+		if previousURL != body.GitRepoURL {
+			gitops.RemoveRepo(project.ID)
+		}
+		// Handle enterprise repo changes
+		if !project.EnterpriseEnabled && previousEnterprise {
+			gitops.RemoveEnterpriseRepo(project.ID)
+		}
+		// Handle design-themes repo changes
+		if !project.DesignThemesEnabled && previousDesignThemes {
+			gitops.RemoveDesignThemesRepo(project.ID)
+		}
+		addonsDir := h.addonsHostDir(r.Context(), project.ID, project.GitRepoURL, project.GitRepoBranch)
+		entDir := h.enterpriseHostDir(r.Context(), project.ID, project.OdooVersion, project.EnterpriseEnabled)
+		dtDir := h.designThemesHostDir(r.Context(), project.ID, project.OdooVersion, project.DesignThemesEnabled)
+		if err := h.dockerManager.RecreateOdooContainer(r.Context(), project, addonsDir, entDir, dtDir); err != nil {
+			log.Printf("Warning: failed to recreate container for project %s: %v", project.ID, err)
+		}
+		// Update odoo.conf addons_path when repo URL is added or removed
+		hasRepo := body.GitRepoURL != ""
+		hadRepo := previousURL != ""
+		if hasRepo != hadRepo {
+			if err := h.dockerManager.UpdateOdooConfigExtraAddons(r.Context(), project.ID, hasRepo); err != nil {
+				log.Printf("Warning: failed to update odoo.conf extra-addons for project %s: %v", project.ID, err)
+			}
+		}
+		// Update odoo.conf addons_path when enterprise flag changes
+		if previousEnterprise != project.EnterpriseEnabled {
+			if err := h.dockerManager.UpdateOdooConfigEnterprise(r.Context(), project.ID, project.EnterpriseEnabled); err != nil {
+				log.Printf("Warning: failed to update odoo.conf addons_path for project %s: %v", project.ID, err)
+			}
+		}
+		// Update odoo.conf addons_path when design themes flag changes
+		if previousDesignThemes != project.DesignThemesEnabled {
+			if err := h.dockerManager.UpdateOdooConfigDesignThemes(r.Context(), project.ID, project.DesignThemesEnabled); err != nil {
+				log.Printf("Warning: failed to update odoo.conf design-themes for project %s: %v", project.ID, err)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// handleRepoBranches returns the list of branches for a given repo URL.
+// GET /api/repo/branches?url=https://...git
+func (h *Handler) handleRepoBranches(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	repoURL := r.URL.Query().Get("url")
+	if repoURL == "" {
+		http.Error(w, "Missing url parameter", http.StatusBadRequest)
+		return
+	}
+
+	if err := gitops.ValidateRepoURL(repoURL); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	token := h.store.GetSetting("github_pat")
+	branches, err := gitops.ListBranches(r.Context(), repoURL, token)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to list branches: " + err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(branches)
+}
+
+// handleEnterpriseCheckAccess checks whether the stored PAT token has access
+// to the Odoo Enterprise repository.
+// GET /api/enterprise/check-access → { "accessible": true/false, "error": "..." }
+func (h *Handler) handleEnterpriseCheckAccess(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := h.store.GetSetting("github_pat")
+	if token == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accessible": false,
+			"error":      "No GitHub PAT token configured. Set one in Configuration.",
+		})
+		return
+	}
+
+	err := gitops.CheckEnterpriseAccess(r.Context(), token)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accessible": false,
+			"error":      "Your PAT token does not have access to the Odoo Enterprise repository.",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"accessible": true,
+	})
+}
+
+// handleDesignThemesCheckAccess checks whether the stored PAT token has access
+// to the Odoo Design Themes repository.
+// GET /api/design-themes/check-access → { "accessible": true/false, "error": "..." }
+func (h *Handler) handleDesignThemesCheckAccess(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := h.store.GetSetting("github_pat")
+	if token == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accessible": false,
+			"error":      "No GitHub PAT token configured. Set one in Configuration.",
+		})
+		return
+	}
+
+	err := gitops.CheckDesignThemesAccess(r.Context(), token)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accessible": false,
+			"error":      "Your PAT token does not have access to the Odoo Design Themes repository.",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"accessible": true,
+	})
+}
+
+// handleUpdateOdoo pulls the latest Odoo image, recreates the Odoo container
+// (preserving data volumes), and git-pulls all configured repos.
+func (h *Handler) handleUpdateOdoo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.PathValue("id")
+	project, ok := h.store.Get(id)
+	if !ok {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	h.events.Publish(events.Event{Type: events.ProjectActionPending, ProjectID: id, Data: "updating"})
+
+	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				log.Printf("PANIC in handleUpdateOdoo for %s: %v", id, rv)
+				project.Status = "error"
+				_ = h.store.Update(project)
+				h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+			}
+		}()
+
+		gitCtx, gitCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer gitCancel()
+
+		addonsDir := h.addonsHostDir(gitCtx, project.ID, project.GitRepoURL, project.GitRepoBranch)
+		entDir := h.enterpriseHostDir(gitCtx, project.ID, project.OdooVersion, project.EnterpriseEnabled)
+		dtDir := h.designThemesHostDir(gitCtx, project.ID, project.OdooVersion, project.DesignThemesEnabled)
+
+		log.Printf("Project %s: pulling latest Odoo image and recreating container...", id)
+		if err := h.dockerManager.UpdateOdooContainer(context.Background(), project, addonsDir, entDir, dtDir); err != nil {
+			log.Printf("Project %s: update failed: %v", id, err)
+			project.Status = "error"
+			_ = h.store.Update(project)
+			h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+			return
+		}
+
+		status, _ := h.dockerManager.GetProjectStatus(context.Background(), project.ID)
+		project.Status = status
+		_ = h.store.Update(project)
+		log.Printf("Project %s: Odoo update complete (status=%s)", id, status)
+		h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// handleUpdateRepos git-pulls the project's addons, enterprise, and
+// design-themes repos. If odoo.conf contains dev=all or dev=reload it
+// skips the restart (Odoo auto-reloads), otherwise it restarts the Odoo
+// container.
+func (h *Handler) handleUpdateRepos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.PathValue("id")
+	project, ok := h.store.Get(id)
+	if !ok {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	if project.GitRepoURL == "" {
+		http.Error(w, "No repository configured", http.StatusBadRequest)
+		return
+	}
+
+	if h.dockerManager == nil {
+		http.Error(w, "Docker manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	h.events.Publish(events.Event{Type: events.ProjectActionPending, ProjectID: id, Data: "updating-repo"})
+
+	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				log.Printf("PANIC in handleUpdateRepos for %s: %v", id, rv)
+				project.Status = "error"
+				_ = h.store.Update(project)
+				h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+			}
+		}()
+
+		gitCtx, gitCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer gitCancel()
+
+		addonsDir := h.addonsHostDir(gitCtx, project.ID, project.GitRepoURL, project.GitRepoBranch)
+		if addonsDir == "" {
+			log.Printf("Project %s: repo pull failed (addonsHostDir returned empty)", id)
+			status, _ := h.dockerManager.GetProjectStatus(context.Background(), project.ID)
+			project.Status = status
+			_ = h.store.Update(project)
+			h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+			return
+		}
+
+		// Also pull enterprise and design-themes repos if enabled
+		h.enterpriseHostDir(gitCtx, project.ID, project.OdooVersion, project.EnterpriseEnabled)
+		h.designThemesHostDir(gitCtx, project.ID, project.OdooVersion, project.DesignThemesEnabled)
+
+		// Check odoo.conf for dev mode (all or reload)
+		needsRestart := true
+		confContent, err := h.dockerManager.ReadOdooConfig(context.Background(), project.ID)
+		if err == nil {
+			for _, line := range strings.Split(string(confContent), "\n") {
+				trimmed := strings.TrimSpace(line)
+				lower := strings.ToLower(trimmed)
+				if strings.HasPrefix(lower, "dev") && !strings.HasPrefix(lower, "dev_") {
+					parts := strings.SplitN(lower, "=", 2)
+					if len(parts) == 2 {
+						val := strings.TrimSpace(parts[1])
+						if strings.Contains(val, "all") || strings.Contains(val, "reload") {
+							needsRestart = false
+							log.Printf("Project %s: dev mode detected (%s), skipping restart", id, val)
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if needsRestart {
+			log.Printf("Project %s: restarting Odoo container after code update...", id)
+			if err := h.dockerManager.RestartOdooContainer(context.Background(), project.ID); err != nil {
+				log.Printf("Project %s: restart failed: %v", id, err)
+			}
+		}
+
+		status, _ := h.dockerManager.GetProjectStatus(context.Background(), project.ID)
+		project.Status = status
+		_ = h.store.Update(project)
+		log.Printf("Project %s: repos update complete (status=%s, restarted=%v)", id, status, needsRestart)
+		h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// handleRestartOdoo restarts only the Odoo container for a project.
+// POST /api/projects/{id}/restart-odoo
+func (h *Handler) handleRestartOdoo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.PathValue("id")
+	project, ok := h.store.Get(id)
+	if !ok {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	}
+
+	if h.dockerManager == nil {
+		http.Error(w, "Docker not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	go func() {
+		defer func() {
+			if rv := recover(); rv != nil {
+				log.Printf("PANIC in handleRestartOdoo for %s: %v", id, rv)
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		if err := h.dockerManager.RestartOdooContainer(ctx, project.ID); err != nil {
+			log.Printf("Project %s: restart failed: %v", id, err)
+		}
+
+		status, _ := h.dockerManager.GetProjectStatus(context.Background(), id)
+		project.Status = status
+		_ = h.store.Update(project)
+		h.events.Publish(events.Event{Type: events.ProjectStatusChanged, ProjectID: id, Data: project})
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
 }

@@ -2,10 +2,10 @@ package docker
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +23,29 @@ import (
 // Manager handles Docker operations for Odoo and Postgres containers
 type Manager struct {
 	cli *client.Client
+}
+
+// odooEntrypoint returns the custom entrypoint that pip-installs a
+// requirements.txt from the addons directory (if present) before
+// handing off to the stock Odoo entrypoint.
+func odooEntrypoint() []string {
+	return []string{"/bin/bash", "-c",
+		`if [ -f /mnt/extra-addons/requirements.txt ]; then pip3 install --no-cache-dir --break-system-packages -r /mnt/extra-addons/requirements.txt; fi; exec /entrypoint.sh "$@"`,
+		"--"}
+}
+
+// odooCmd returns the default command passed to the entrypoint.
+func odooCmd() []string { return []string{"odoo"} }
+
+// configDir returns the local host directory for a project's odoo.conf.
+// e.g. data/config/{projectID}
+func configDir(projectID string) string {
+	return filepath.Join("data", "config", projectID)
+}
+
+// configFilePath returns the local host path to a project's odoo.conf.
+func configFilePath(projectID string) string {
+	return filepath.Join(configDir(projectID), "odoo.conf")
 }
 
 // NewManager creates a new Docker manager
@@ -67,7 +90,11 @@ func postgresImage(odooVersion string, pgVersion string) string {
 }
 
 // CreateProject pulls images and creates containers for a project without starting them.
-func (m *Manager) CreateProject(ctx context.Context, project *store.Project) error {
+// addonsHostDir is the absolute path on the host to bind-mount at /mnt/extra-addons
+// inside the Odoo container. enterpriseHostDir is the absolute path to bind-mount at
+// /mnt/enterprise-addons. designThemesHostDir is the absolute path to bind-mount at
+// /mnt/design-themes. Pass empty string for any to skip.
+func (m *Manager) CreateProject(ctx context.Context, project *store.Project, addonsHostDir, enterpriseHostDir, designThemesHostDir string) error {
 	// Create Postgres container
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 	postgresConfig := &container.Config{
@@ -102,10 +129,38 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 		ExposedPorts: nat.PortSet{
 			"8069/tcp": struct{}{},
 		},
-		Tty:    true, // enable TTY so Odoo outputs ANSI colors in logs
-		Labels: projectLabels(project.ID, "odoo"),
+		Entrypoint: odooEntrypoint(),
+		Cmd:        odooCmd(),
+		Tty:        true, // enable TTY so Odoo outputs ANSI colors in logs
+		Labels:     projectLabels(project.ID, "odoo"),
 	}
-	configVolumeName := fmt.Sprintf("odoo-config-%s", project.ID)
+
+	// Write odoo.conf to local host directory before creating the container
+	confDir := configDir(project.ID)
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	confContent := defaultOdooConf(addonsHostDir != "", enterpriseHostDir != "", designThemesHostDir != "")
+	if err := os.WriteFile(configFilePath(project.ID), []byte(confContent), 0o644); err != nil {
+		return fmt.Errorf("write odoo.conf: %w", err)
+	}
+	absConfDir, err := filepath.Abs(confDir)
+	if err != nil {
+		return fmt.Errorf("resolve config dir: %w", err)
+	}
+
+	binds := []string{
+		fmt.Sprintf("%s:/etc/odoo", absConfDir),
+	}
+	if addonsHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/extra-addons", addonsHostDir))
+	}
+	if enterpriseHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/enterprise-addons", enterpriseHostDir))
+	}
+	if designThemesHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/design-themes", designThemesHostDir))
+	}
 	odooHostConfig := &container.HostConfig{
 		Links: []string{fmt.Sprintf("%s:postgres", postgresContainerName)},
 		PortBindings: nat.PortMap{
@@ -113,9 +168,7 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
 			},
 		},
-		Binds: []string{
-			fmt.Sprintf("%s:/etc/odoo", configVolumeName),
-		},
+		Binds: binds,
 	}
 
 	if !m.containerExists(ctx, odooContainerName) {
@@ -125,53 +178,43 @@ func (m *Manager) CreateProject(ctx context.Context, project *store.Project) err
 		if _, err := m.cli.ContainerCreate(ctx, odooConfig, odooHostConfig, nil, nil, odooContainerName); err != nil {
 			return fmt.Errorf("failed to create odoo container: %w", err)
 		}
-		// Seed the config volume with the default odoo.conf from the image.
-		if err := m.seedOdooConfig(ctx, odooContainerName); err != nil {
-			// Non-fatal: the container will still start with defaults.
-			fmt.Printf("Warning: failed to seed odoo.conf for %s: %v\n", project.ID, err)
-		}
 	}
-
-	return nil
-}
-
-// seedOdooConfig copies the default /etc/odoo/odoo.conf from the Odoo image
-// into the config volume. It starts the container briefly to populate the
-// volume, copies the default config out, then stops the container.
-func (m *Manager) seedOdooConfig(ctx context.Context, containerName string) error {
-	// Start the container briefly so the entrypoint writes the default config
-	if err := m.cli.ContainerStart(ctx, containerName, container.StartOptions{}); err != nil {
-		return fmt.Errorf("failed to start container for seeding: %w", err)
-	}
-
-	// The entrypoint may need a moment to write /etc/odoo/odoo.conf
-	// We'll just check if the file exists; if not, write a sensible default.
-	_, _, err := m.cli.CopyFromContainer(ctx, containerName, "/etc/odoo/odoo.conf")
-	if err != nil {
-		// File doesn't exist yet — write a minimal default
-		defaultConf := defaultOdooConf()
-		if werr := m.writeFileToContainer(ctx, containerName, "/etc/odoo/odoo.conf", []byte(defaultConf)); werr != nil {
-			return fmt.Errorf("failed to write default config: %w", werr)
-		}
-	}
-
-	// Stop the container — CreateProject should leave containers stopped
-	timeout := 10
-	_ = m.cli.ContainerStop(ctx, containerName, container.StopOptions{Timeout: &timeout})
 
 	return nil
 }
 
 // defaultOdooConf returns a minimal default odoo.conf.
-func defaultOdooConf() string {
-	return `[options]
-addons_path = /mnt/extra-addons
+// When hasRepo is true, addons_path includes /mnt/extra-addons.
+// When enterprise is true, addons_path includes /mnt/enterprise-addons.
+// When designThemes is true, addons_path includes /mnt/design-themes.
+func defaultOdooConf(hasRepo, enterprise, designThemes bool) string {
+	var paths []string
+	if hasRepo {
+		paths = append(paths, "/mnt/extra-addons")
+	}
+	if enterprise {
+		paths = append(paths, "/mnt/enterprise-addons")
+	}
+	if designThemes {
+		paths = append(paths, "/mnt/design-themes")
+	}
+	addonsPath := strings.Join(paths, ", ")
+	if addonsPath == "" {
+		return `[options]
 data_dir = /var/lib/odoo
 `
+	}
+	return fmt.Sprintf(`[options]
+addons_path = %s
+data_dir = /var/lib/odoo
+`, addonsPath)
 }
 
-// StartProject starts Odoo and Postgres containers for a project
-func (m *Manager) StartProject(ctx context.Context, project *store.Project) error {
+// StartProject starts Odoo and Postgres containers for a project.
+// addonsHostDir is the absolute path on the host to bind-mount at /mnt/extra-addons.
+// enterpriseHostDir is the absolute path to bind-mount at /mnt/enterprise-addons.
+// designThemesHostDir is the absolute path to bind-mount at /mnt/design-themes.
+func (m *Manager) StartProject(ctx context.Context, project *store.Project, addonsHostDir, enterpriseHostDir, designThemesHostDir string) error {
 	// Start Postgres container first
 	postgresContainerName := fmt.Sprintf("postgres-%s", project.ID)
 	postgresConfig := &container.Config{
@@ -218,11 +261,25 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 		ExposedPorts: nat.PortSet{
 			"8069/tcp": struct{}{},
 		},
-		Tty:    true, // enable TTY so Odoo outputs ANSI colors in logs
-		Labels: projectLabels(project.ID, "odoo"),
+		Entrypoint: odooEntrypoint(),
+		Cmd:        odooCmd(),
+		Tty:        true, // enable TTY so Odoo outputs ANSI colors in logs
+		Labels:     projectLabels(project.ID, "odoo"),
 	}
 
-	configVolumeName := fmt.Sprintf("odoo-config-%s", project.ID)
+	absConfDir, _ := filepath.Abs(configDir(project.ID))
+	binds := []string{
+		fmt.Sprintf("%s:/etc/odoo", absConfDir),
+	}
+	if addonsHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/extra-addons", addonsHostDir))
+	}
+	if enterpriseHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/enterprise-addons", enterpriseHostDir))
+	}
+	if designThemesHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/design-themes", designThemesHostDir))
+	}
 	odooHostConfig := &container.HostConfig{
 		Links: []string{fmt.Sprintf("%s:postgres", postgresContainerName)},
 		PortBindings: nat.PortMap{
@@ -230,9 +287,7 @@ func (m *Manager) StartProject(ctx context.Context, project *store.Project) erro
 				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
 			},
 		},
-		Binds: []string{
-			fmt.Sprintf("%s:/etc/odoo", configVolumeName),
-		},
+		Binds: binds,
 	}
 
 	// Check if odoo container exists
@@ -339,7 +394,7 @@ func (m *Manager) ReconcileStatus(ctx context.Context, project *store.Project) s
 	// Don't overwrite transient statuses — the async goroutine will
 	// broadcast the real status once the operation completes.
 	switch project.Status {
-	case "creating", "deleting", "starting", "stopping":
+	case "creating", "deleting", "starting", "stopping", "updating", "updating-repo":
 		return project.Status
 	}
 	status, err := m.GetProjectStatus(ctx, project.ID)
@@ -375,7 +430,209 @@ func (m *Manager) RemoveProject(ctx context.Context, project *store.Project) err
 		}
 	}
 
+	// Remove local config directory
+	if err := os.RemoveAll(configDir(project.ID)); err != nil {
+		log.Printf("Warning: failed to remove config dir for project %s: %v", project.ID, err)
+	}
+
 	return firstErr
+}
+
+// RecreateOdooContainer removes the existing Odoo container and creates a new
+// one with updated bind mounts. The container is restored to its previous
+// state (running → restarted, stopped → kept stopped). If the container does
+// not exist yet this is a no-op — the correct mounts will be applied on the
+// next StartProject call.
+func (m *Manager) RecreateOdooContainer(ctx context.Context, project *store.Project, addonsHostDir, enterpriseHostDir, designThemesHostDir string) error {
+	odooName := fmt.Sprintf("odoo-%s", project.ID)
+	postgresName := fmt.Sprintf("postgres-%s", project.ID)
+
+	// Check if the container exists and its current state
+	existing, err := m.cli.ContainerInspect(ctx, odooName)
+	if err != nil {
+		// Container doesn't exist — nothing to recreate
+		return nil
+	}
+
+	wasRunning := existing.State.Running
+
+	// Stop if running
+	if wasRunning {
+		timeout := 30
+		if err := m.cli.ContainerStop(ctx, odooName, container.StopOptions{Timeout: &timeout}); err != nil {
+			if !client.IsErrNotFound(err) {
+				return fmt.Errorf("stop odoo container: %w", err)
+			}
+		}
+	}
+
+	// Remove the old container
+	if err := m.cli.ContainerRemove(ctx, odooName, container.RemoveOptions{Force: true}); err != nil {
+		if !client.IsErrNotFound(err) {
+			return fmt.Errorf("remove odoo container: %w", err)
+		}
+	}
+
+	// Build mounts — same logic as CreateProject / StartProject
+	absConfDir, _ := filepath.Abs(configDir(project.ID))
+	binds := []string{
+		fmt.Sprintf("%s:/etc/odoo", absConfDir),
+	}
+	if addonsHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/extra-addons", addonsHostDir))
+	}
+	if enterpriseHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/enterprise-addons", enterpriseHostDir))
+	}
+	if designThemesHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/design-themes", designThemesHostDir))
+	}
+
+	odooConfig := &container.Config{
+		Image: fmt.Sprintf("odoo:%s", project.OdooVersion),
+		Env: []string{
+			"HOST=postgres",
+			"USER=odoo",
+			"PASSWORD=odoo",
+		},
+		ExposedPorts: nat.PortSet{
+			"8069/tcp": struct{}{},
+		},
+		Entrypoint: odooEntrypoint(),
+		Cmd:        odooCmd(),
+		Tty:        true,
+		Labels:     projectLabels(project.ID, "odoo"),
+	}
+	odooHostConfig := &container.HostConfig{
+		Links: []string{fmt.Sprintf("%s:postgres", postgresName)},
+		PortBindings: nat.PortMap{
+			"8069/tcp": []nat.PortBinding{
+				{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)},
+			},
+		},
+		Binds: binds,
+	}
+
+	if _, err := m.cli.ContainerCreate(ctx, odooConfig, odooHostConfig, nil, nil, odooName); err != nil {
+		return fmt.Errorf("recreate odoo container: %w", err)
+	}
+
+	// Restore previous state
+	if wasRunning {
+		if err := m.cli.ContainerStart(ctx, odooName, container.StartOptions{}); err != nil {
+			return fmt.Errorf("restart odoo container: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// UpdateOdooContainer pulls the latest Odoo image and recreates only the Odoo
+// container, preserving all data volumes (the anonymous /var/lib/odoo volume
+// is found on the old container and explicitly re-bound). Git repo, enterprise
+// and design-themes directories are passed as absolute host paths (empty means
+// not configured).
+func (m *Manager) UpdateOdooContainer(ctx context.Context, project *store.Project, addonsHostDir, enterpriseHostDir, designThemesHostDir string) error {
+	odooName := fmt.Sprintf("odoo-%s", project.ID)
+	postgresName := fmt.Sprintf("postgres-%s", project.ID)
+	odooImage := fmt.Sprintf("odoo:%s", project.OdooVersion)
+
+	// Inspect the existing container to capture its running state and data volume.
+	existing, err := m.cli.ContainerInspect(ctx, odooName)
+	wasRunning := false
+	var dataVolumeName string
+	if err == nil {
+		wasRunning = existing.State.Running
+		// Find the anonymous volume mounted at /var/lib/odoo
+		for _, mp := range existing.Mounts {
+			if mp.Destination == "/var/lib/odoo" {
+				dataVolumeName = mp.Name
+				break
+			}
+		}
+	}
+
+	// Pull the latest image.
+	if err := m.pullImage(ctx, odooImage); err != nil {
+		return fmt.Errorf("pull latest odoo image: %w", err)
+	}
+
+	// Stop if running.
+	if wasRunning {
+		timeout := 30
+		if err := m.cli.ContainerStop(ctx, odooName, container.StopOptions{Timeout: &timeout}); err != nil {
+			if !client.IsErrNotFound(err) {
+				return fmt.Errorf("stop odoo container: %w", err)
+			}
+		}
+	}
+
+	// Remove old container (volumes survive).
+	if err := m.cli.ContainerRemove(ctx, odooName, container.RemoveOptions{Force: true}); err != nil {
+		if !client.IsErrNotFound(err) {
+			return fmt.Errorf("remove odoo container: %w", err)
+		}
+	}
+
+	// Build binds — same pattern as CreateProject / StartProject.
+	absConfDir, _ := filepath.Abs(configDir(project.ID))
+	binds := []string{
+		fmt.Sprintf("%s:/etc/odoo", absConfDir),
+	}
+	if addonsHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/extra-addons", addonsHostDir))
+	}
+	if enterpriseHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/enterprise-addons", enterpriseHostDir))
+	}
+	if designThemesHostDir != "" {
+		binds = append(binds, fmt.Sprintf("%s:/mnt/design-themes", designThemesHostDir))
+	}
+	// Re-attach the data volume so /var/lib/odoo data is preserved.
+	if dataVolumeName != "" {
+		binds = append(binds, fmt.Sprintf("%s:/var/lib/odoo", dataVolumeName))
+	}
+
+	odooConfig := &container.Config{
+		Image: odooImage,
+		Env: []string{
+			"HOST=postgres",
+			"USER=odoo",
+			"PASSWORD=odoo",
+		},
+		ExposedPorts: nat.PortSet{"8069/tcp": struct{}{}},
+		Entrypoint:   odooEntrypoint(),
+		Cmd:          odooCmd(),
+		Tty:          true,
+		Labels:       projectLabels(project.ID, "odoo"),
+	}
+	odooHostConfig := &container.HostConfig{
+		Links: []string{fmt.Sprintf("%s:postgres", postgresName)},
+		PortBindings: nat.PortMap{
+			"8069/tcp": []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", project.Port)}},
+		},
+		Binds: binds,
+	}
+
+	if _, err := m.cli.ContainerCreate(ctx, odooConfig, odooHostConfig, nil, nil, odooName); err != nil {
+		return fmt.Errorf("recreate odoo container: %w", err)
+	}
+
+	// Restore previous state.
+	if wasRunning {
+		_ = m.cli.ContainerStart(ctx, postgresName, container.StartOptions{})
+		if err := m.cli.ContainerStart(ctx, odooName, container.StartOptions{}); err != nil {
+			return fmt.Errorf("restart odoo container: %w", err)
+		}
+	}
+	return nil
+}
+
+// RestartOdooContainer restarts just the Odoo container without recreating it.
+func (m *Manager) RestartOdooContainer(ctx context.Context, projectID string) error {
+	odooName := fmt.Sprintf("odoo-%s", projectID)
+	timeout := 30
+	return m.cli.ContainerRestart(ctx, odooName, container.StopOptions{Timeout: &timeout})
 }
 
 // CleanupResult holds the outcome of a cleanup operation.
@@ -707,57 +964,84 @@ func (m *Manager) WaitExec(ctx context.Context, execID string) (int, error) {
 	}
 }
 
-// ReadOdooConfig reads /etc/odoo/odoo.conf from the Odoo container.
-// Works whether the container is running or stopped.
-func (m *Manager) ReadOdooConfig(ctx context.Context, projectID string) (string, error) {
-	containerName := fmt.Sprintf("odoo-%s", projectID)
-	rc, _, err := m.cli.CopyFromContainer(ctx, containerName, "/etc/odoo/odoo.conf")
+// ReadOdooConfig reads odoo.conf from the local config directory for a project.
+func (m *Manager) ReadOdooConfig(_ context.Context, projectID string) (string, error) {
+	data, err := os.ReadFile(configFilePath(projectID))
 	if err != nil {
 		return "", fmt.Errorf("failed to read odoo.conf: %w", err)
-	}
-	defer rc.Close()
-
-	tr := tar.NewReader(rc)
-	if _, err := tr.Next(); err != nil {
-		return "", fmt.Errorf("failed to read tar header: %w", err)
-	}
-	data, err := io.ReadAll(tr)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file contents: %w", err)
 	}
 	return string(data), nil
 }
 
-// WriteOdooConfig writes content to /etc/odoo/odoo.conf inside the Odoo container.
-func (m *Manager) WriteOdooConfig(ctx context.Context, projectID string, content string) error {
-	containerName := fmt.Sprintf("odoo-%s", projectID)
-	return m.writeFileToContainer(ctx, containerName, "/etc/odoo/odoo.conf", []byte(content))
+// WriteOdooConfig writes content to the local odoo.conf for a project.
+func (m *Manager) WriteOdooConfig(_ context.Context, projectID string, content string) error {
+	dir := configDir(projectID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	return os.WriteFile(configFilePath(projectID), []byte(content), 0o644)
 }
 
-// writeFileToContainer writes data into a file inside a container using the
-// Docker copy-to-container API (tar archive).
-func (m *Manager) writeFileToContainer(ctx context.Context, containerName, filePath string, data []byte) error {
-	dir := filepath.Dir(filePath)
-	base := filepath.Base(filePath)
+// UpdateOdooConfigEnterprise reads the existing odoo.conf for a project and
+// adds or removes /mnt/enterprise-addons from the addons_path line.
+func (m *Manager) UpdateOdooConfigEnterprise(ctx context.Context, projectID string, enableEnterprise bool) error {
+	return m.updateOdooConfigAddonPath(ctx, projectID, "/mnt/enterprise-addons", enableEnterprise)
+}
 
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	hdr := &tar.Header{
-		Name: base,
-		Mode: 0644,
-		Size: int64(len(data)),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	if _, err := tw.Write(data); err != nil {
-		return err
-	}
-	if err := tw.Close(); err != nil {
+// UpdateOdooConfigExtraAddons reads the existing odoo.conf for a project and
+// adds or removes /mnt/extra-addons from the addons_path line.
+func (m *Manager) UpdateOdooConfigExtraAddons(ctx context.Context, projectID string, enableExtraAddons bool) error {
+	return m.updateOdooConfigAddonPath(ctx, projectID, "/mnt/extra-addons", enableExtraAddons)
+}
+
+// UpdateOdooConfigDesignThemes reads the existing odoo.conf for a project and
+// adds or removes /mnt/design-themes from the addons_path line.
+func (m *Manager) UpdateOdooConfigDesignThemes(ctx context.Context, projectID string, enableDesignThemes bool) error {
+	return m.updateOdooConfigAddonPath(ctx, projectID, "/mnt/design-themes", enableDesignThemes)
+}
+
+// updateOdooConfigAddonPath is the shared implementation for adding or
+// removing a single path from the addons_path line in odoo.conf.
+func (m *Manager) updateOdooConfigAddonPath(ctx context.Context, projectID, addonPath string, enable bool) error {
+	content, err := m.ReadOdooConfig(ctx, projectID)
+	if err != nil {
 		return err
 	}
 
-	return m.cli.CopyToContainer(ctx, containerName, dir, &buf, container.CopyToContainerOptions{})
+	lines := strings.Split(content, "\n")
+	found := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "addons_path") {
+			continue
+		}
+		found = true
+		// Parse the value after '='
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		paths := strings.Split(parts[1], ",")
+		var cleaned []string
+		for _, p := range paths {
+			p = strings.TrimSpace(p)
+			if p != "" && p != addonPath {
+				cleaned = append(cleaned, p)
+			}
+		}
+		if enable {
+			cleaned = append(cleaned, addonPath)
+		}
+		lines[i] = "addons_path = " + strings.Join(cleaned, ", ")
+		break
+	}
+
+	if !found && enable {
+		// No addons_path found — append one
+		lines = append(lines, "addons_path = "+addonPath)
+	}
+
+	return m.WriteOdooConfig(ctx, projectID, strings.Join(lines, "\n"))
 }
 
 // CopyBackupFromContainer copies /tmp/odoo_backup.zip out of the Odoo

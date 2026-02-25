@@ -34,6 +34,12 @@ templ sidebarContent() {
 							Maintenance
 						</a>
 					</li>
+					<li>
+						<a href="/configuration" data-nav-link data-spa-link class="group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-gray-800 hover:text-white">
+							<svg class="size-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+							Configuration
+						</a>
+					</li>
 				</ul>
 			</li>
 			<li class="mt-auto">
@@ -189,6 +195,71 @@ templ Layout(title string) {
 												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
 											/>
 										</div>
+										<div>
+											<label for="projectRepoUrl" class="block text-sm/6 font-medium text-white">GitHub Repository <span class="text-gray-500 font-normal">(optional)</span></label>
+											<input
+												type="url"
+												id="projectRepoUrl"
+												name="git_repo_url"
+												placeholder="https://github.com/owner/repo.git"
+												onblur="fetchCreateBranches()"
+												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6"
+											/>
+											<p class="text-xs text-gray-500 mt-1.5">Clone a repo and mount it at <code class="text-gray-400">/mnt/extra-addons</code>. Must be https:// and end in .git</p>
+										</div>
+										<div id="createBranchWrapper" class="hidden">
+											<label for="projectBranch" class="block text-sm/6 font-medium text-white">Branch</label>
+											<select
+												id="projectBranch"
+												name="git_repo_branch"
+												class="mt-2 block w-full rounded-md bg-white/5 px-3 py-1.5 text-base text-white outline-1 -outline-offset-1 outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-500 sm:text-sm/6 *:bg-gray-900"
+											></select>
+											<p id="createBranchHint" class="text-xs text-gray-500 mt-1"></p>
+										</div>
+										<div id="createEnterpriseWrapper">
+											<div class="flex items-center justify-between">
+												<div class="flex items-center gap-x-2">
+													<label for="createEnterpriseToggle" class="text-sm/6 font-medium text-white">Enable Enterprise</label>
+													<span class="inline-flex items-center rounded-md bg-purple-400/10 px-2 py-0.5 text-xs font-medium text-purple-400 ring-1 ring-inset ring-purple-400/20">Paid</span>
+												</div>
+												<button
+													type="button"
+													id="createEnterpriseToggle"
+													role="switch"
+													aria-checked="false"
+													disabled
+													onclick="toggleCreateEnterprise()"
+													class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-700 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+												>
+													<span class="pointer-events-none relative inline-block h-5 w-5 translate-x-0 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+												</button>
+											</div>
+											<p class="text-xs text-gray-500 mt-1">Mounts <code class="text-gray-400">odoo/enterprise</code> at <code class="text-gray-400">/mnt/enterprise-addons</code> using the Odoo version branch.</p>
+											<p id="createEnterpriseWarning" class="text-xs text-yellow-400 mt-1 hidden"></p>
+											<input type="hidden" id="createEnterpriseValue" name="enterprise_enabled" value="false"/>
+										</div>
+										<div id="createDesignThemesWrapper">
+											<div class="flex items-center justify-between">
+												<div class="flex items-center gap-x-2">
+													<label for="createDesignThemesToggle" class="text-sm/6 font-medium text-white">Design Themes</label>
+													<span class="inline-flex items-center rounded-md bg-green-400/10 px-2 py-0.5 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-400/20">Free</span>
+												</div>
+												<button
+													type="button"
+													id="createDesignThemesToggle"
+													role="switch"
+													aria-checked="false"
+													disabled
+													onclick="toggleCreateDesignThemes()"
+													class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-700 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+												>
+													<span class="pointer-events-none relative inline-block h-5 w-5 translate-x-0 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+												</button>
+											</div>
+											<p class="text-xs text-gray-500 mt-1">Mounts <code class="text-gray-400">odoo/design-themes</code> at <code class="text-gray-400">/mnt/design-themes</code> using the Odoo version branch.</p>
+											<p id="createDesignThemesWarning" class="text-xs text-yellow-400 mt-1 hidden"></p>
+											<input type="hidden" id="createDesignThemesValue" name="design_themes_enabled" value="false"/>
+										</div>
 									</div>
 								</div>
 								<div class="flex items-center justify-end gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
@@ -253,24 +324,106 @@ templ Layout(title string) {
 										<svg class="size-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
 									</div>
 									<div class="min-w-0 flex-1">
-										<h3 id="configModalTitle" class="text-base font-semibold text-white">odoo.conf</h3>
-										<p class="mt-0.5 text-xs text-gray-400">Edit the Odoo configuration file. Changes take effect after restarting the project.</p>
+										<h3 id="configModalTitle" class="text-base font-semibold text-white">Project Configuration</h3>
+										<p class="mt-0.5 text-xs text-gray-400">Edit the Odoo configuration file and GitHub repository settings.</p>
 									</div>
 								</div>
-								<div id="configLoading" class="mt-4 flex items-center justify-center py-12">
+								<!-- odoo.conf section -->
+								<div class="mt-4">
+									<label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">odoo.conf</label>
+								</div>
+								<div id="configLoading" class="mt-2 flex items-center justify-center py-12">
 									<svg class="animate-spin h-6 w-6 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
 								</div>
-								<div id="configError" class="mt-4 hidden rounded-md bg-red-500/10 p-3 text-sm text-red-400 ring-1 ring-inset ring-red-500/20"></div>
+								<div id="configError" class="mt-2 hidden rounded-md bg-red-500/10 p-3 text-sm text-red-400 ring-1 ring-inset ring-red-500/20"></div>
 								<textarea
 									id="configEditor"
-									class="mt-4 hidden w-full rounded-md bg-gray-950 px-3 py-2 font-mono text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-600"
-									rows="18"
+									class="mt-2 hidden w-full rounded-md bg-gray-950 px-3 py-2 font-mono text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-600"
+									rows="16"
 									spellcheck="false"
 								></textarea>
+								<!-- GitHub Repository section -->
+								<div class="mt-5 border-t border-white/5 pt-4">
+									<label for="repoUrlInput" class="text-xs font-semibold text-gray-400 uppercase tracking-wider">GitHub Repository</label>
+									<p class="mt-1 text-xs text-gray-500">URL to a Git repository (https://...git). The repo will be cloned and mounted at <code class="text-gray-400">/mnt/extra-addons</code> in the container.</p>
+									<div class="mt-2 flex gap-2">
+										<input
+											id="repoUrlInput"
+											type="url"
+											placeholder="https://github.com/owner/repo.git"
+											onblur="fetchConfigBranches()"
+											class="flex-1 rounded-md bg-gray-950 px-3 py-2 text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-600"
+										/>
+									</div>
+									<div id="configBranchWrapper" class="mt-3 hidden">
+										<label for="repoBranchSelect" class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Branch</label>
+										<select
+											id="repoBranchSelect"
+											class="mt-1 block w-full rounded-md bg-gray-950 px-3 py-2 text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 *:bg-gray-950"
+										></select>
+										<p id="configBranchHint" class="text-xs text-gray-500 mt-1"></p>
+									</div>
+									<!-- Enterprise toggle -->
+									<div class="mt-4 pt-3 border-t border-white/5" id="configEnterpriseWrapper">
+										<div class="flex items-center justify-between">
+											<div class="flex items-center gap-x-2">
+												<label for="configEnterpriseToggle" class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Enterprise</label>
+												<span class="inline-flex items-center rounded-md bg-purple-400/10 px-2 py-0.5 text-xs font-medium text-purple-400 ring-1 ring-inset ring-purple-400/20">Paid</span>
+											</div>
+											<button
+												type="button"
+												id="configEnterpriseToggle"
+												role="switch"
+												aria-checked="false"
+												disabled
+												onclick="toggleConfigEnterprise()"
+												class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-700 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+											>
+												<span class="pointer-events-none relative inline-block h-5 w-5 translate-x-0 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+											</button>
+										</div>
+										<p class="text-xs text-gray-500 mt-1">Mounts <code class="text-gray-400">odoo/enterprise</code> at <code class="text-gray-400">/mnt/enterprise-addons</code>.</p>
+										<p id="configEnterpriseWarning" class="text-xs text-yellow-400 mt-1 hidden"></p>
+									</div>
+									<!-- Design Themes toggle -->
+									<div class="mt-4 pt-3 border-t border-white/5" id="configDesignThemesWrapper">
+										<div class="flex items-center justify-between">
+											<div class="flex items-center gap-x-2">
+												<label for="configDesignThemesToggle" class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Design Themes</label>
+												<span class="inline-flex items-center rounded-md bg-green-400/10 px-2 py-0.5 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-400/20">Free</span>
+											</div>
+											<button
+												type="button"
+												id="configDesignThemesToggle"
+												role="switch"
+												aria-checked="false"
+												disabled
+												onclick="toggleConfigDesignThemes()"
+												class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-gray-700 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+											>
+												<span class="pointer-events-none relative inline-block h-5 w-5 translate-x-0 rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+											</button>
+										</div>
+										<p class="text-xs text-gray-500 mt-1">Mounts <code class="text-gray-400">odoo/design-themes</code> at <code class="text-gray-400">/mnt/design-themes</code>.</p>
+										<p id="configDesignThemesWarning" class="text-xs text-yellow-400 mt-1 hidden"></p>
+									</div>
+									<div id="repoUrlError" class="mt-2 hidden rounded-md bg-red-500/10 p-2 text-xs text-red-400 ring-1 ring-inset ring-red-500/20"></div>
+									<div id="repoUrlSuccess" class="mt-2 hidden rounded-md bg-green-500/10 p-2 text-xs text-green-400 ring-1 ring-inset ring-green-500/20"></div>
+								</div>
 							</div>
-							<div class="flex items-center justify-end gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
-								<button id="configModalCancel" type="button" onclick="hideConfigModal()" class="rounded-md px-3 py-2 text-sm font-semibold text-gray-300 hover:text-white">Cancel</button>
-								<button id="configModalSave" type="button" onclick="saveConfig()" class="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">Save</button>
+							<div class="flex items-center justify-between gap-x-3 border-t border-white/5 px-6 py-4 bg-white/[.02]">
+								<p class="text-xs text-yellow-400/80 flex items-center gap-1">
+									<svg class="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>
+									Changing repository configuration requires a restart to take effect.
+								</p>
+								<div class="flex items-center gap-x-2 shrink-0">
+									<button id="configModalCancel" type="button" onclick="hideConfigModal()" class="rounded-md px-3 py-2 text-sm font-semibold text-gray-300 hover:text-white">Cancel</button>
+									<button id="configModalSave" type="button" onclick="saveConfig()" class="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">Save</button>
+									<button id="configModalSaveRestart" type="button" onclick="saveAndRestartConfig()" class="rounded-md bg-amber-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 inline-flex items-center gap-1.5">
+										<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.016 4.356v4.992"/></svg>
+										Save &amp; Restart
+									</button>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -282,13 +435,29 @@ templ Layout(title string) {
 	</html>
 }
 
-templ DashboardContent(projects []*store.Project) {
+templ DashboardContent(projects []*store.Project, gitAvailable bool) {
 	<div class="sm:flex sm:items-center sm:justify-between">
 		<div>
 			<h1 class="text-2xl font-bold tracking-tight text-white">Dashboard</h1>
 			<p class="mt-2 text-sm text-gray-400">Manage your Odoo projects and containers</p>
 		</div>
 	</div>
+	if !gitAvailable {
+		<div class="mt-6 rounded-xl bg-yellow-500/5 ring-1 ring-yellow-500/20 p-4">
+			<div class="flex gap-3">
+				<svg class="size-5 shrink-0 text-yellow-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+				</svg>
+				<div>
+					<p class="text-sm font-medium text-yellow-300">Git not found</p>
+					<p class="mt-1 text-sm text-yellow-400/80">
+						Git is not installed on this system. Repository features (custom addons, Enterprise, Design Themes) will not work.
+						Install it from <a href="https://git-scm.com/" target="_blank" rel="noopener noreferrer" class="underline hover:text-yellow-300">git-scm.com</a> and restart Odoo Manager.
+					</p>
+				</div>
+			</div>
+		</div>
+	}
 	<div class="mt-8">
 		if len(projects) == 0 {
 			<div id="projectGrid">
@@ -319,9 +488,9 @@ templ DashboardContent(projects []*store.Project) {
 	</div>
 }
 
-templ Index(projects []*store.Project) {
+templ Index(projects []*store.Project, gitAvailable bool) {
 	@Layout("Dashboard") {
-		@DashboardContent(projects)
+		@DashboardContent(projects, gitAvailable)
 	}
 }
 
@@ -381,7 +550,11 @@ templ ProjectCard(project *store.Project) {
 							<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
 						</button>
 					} else {
-						<button disabled class="rounded-md bg-white/5 p-2 text-gray-400 opacity-50 cursor-not-allowed" title="Delete Project">
+						<button
+							onclick={ deleteProject(project.ID) }
+							class="rounded-md bg-white/5 p-2 text-gray-400 hover:text-red-400 hover:bg-white/10 transition-colors"
+							title="Delete Project"
+						>
 							<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/></svg>
 						</button>
 					}
@@ -438,6 +611,41 @@ templ ProjectCard(project *store.Project) {
 					</button>
 				}
 			</div>
+			<!-- Update buttons row -->
+			<div class="mt-4 flex items-center gap-2 border-t border-white/5 pt-4" data-update-buttons>
+				if isTransientStatus(project.Status) {
+					<button disabled class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-500 cursor-not-allowed">
+						if project.Status == "updating" {
+							<svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+						} else {
+							<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.016 4.356v4.992"/></svg>
+						}
+						Update Odoo
+					</button>
+				} else {
+					<button onclick={ updateOdooOnClick(project.ID) } class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 ring-1 ring-inset ring-blue-500/20 transition hover:bg-blue-500/20">
+						<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.016 4.356v4.992"/></svg>
+						Update Odoo
+					</button>
+				}
+				if project.GitRepoURL != "" {
+					if isTransientStatus(project.Status) {
+						<button disabled class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-500 cursor-not-allowed">
+							if project.Status == "updating-repo" {
+								<svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+							} else {
+								<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>
+							}
+							Update Repositories
+						</button>
+					} else {
+						<button onclick={ updateRepoOnClick(project.ID) } class="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-purple-500/10 px-3 py-1.5 text-xs font-medium text-purple-400 ring-1 ring-inset ring-purple-500/20 transition hover:bg-purple-500/20">
+							<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>
+							Update Repositories
+						</button>
+					}
+				}
+			</div>
 		</div>
 	</div>
 }
@@ -455,17 +663,24 @@ templ ProjectsList(projects []*store.Project) {
 
 func isTransientStatus(status string) bool {
 	switch status {
-	case "creating", "deleting", "starting", "stopping":
+	case "creating", "deleting", "starting", "stopping", "updating", "updating-repo":
 		return true
 	}
 	return false
 }
 
 func statusDisplayText(status string) string {
-	if isTransientStatus(status) {
-		return status + "\u2026"
+	switch status {
+	case "updating":
+		return "updating\u2026"
+	case "updating-repo":
+		return "updating repos\u2026"
+	default:
+		if isTransientStatus(status) {
+			return status + "\u2026"
+		}
+		return status
 	}
-	return status
 }
 
 func statusClass(status string) string {
@@ -476,7 +691,7 @@ func statusClass(status string) string {
 		return "bg-gray-400/10 text-gray-400 ring-gray-400/20"
 	case "error":
 		return "bg-red-400/10 text-red-400 ring-red-400/20"
-	case "creating", "starting", "stopping", "deleting":
+	case "creating", "starting", "stopping", "deleting", "updating", "updating-repo":
 		return "bg-yellow-400/10 text-yellow-400 ring-yellow-400/20"
 	default:
 		return "bg-gray-400/10 text-gray-400 ring-gray-400/20"
@@ -489,7 +704,7 @@ func statusDotClass(status string) string {
 		return "bg-green-400"
 	case "error":
 		return "bg-red-400"
-	case "creating", "starting", "stopping", "deleting":
+	case "creating", "starting", "stopping", "deleting", "updating", "updating-repo":
 		return "bg-yellow-400 animate-pulse"
 	default:
 		return "bg-gray-400"
@@ -590,6 +805,70 @@ templ Maintenance() {
 	}
 }
 
+templ ConfigurationContent() {
+	<div id="configurationPage">
+		<div class="flex items-center justify-between">
+			<div>
+				<h1 class="text-2xl font-bold tracking-tight text-white">Configuration</h1>
+				<p class="mt-1 text-sm text-gray-400">Manage global application settings.</p>
+			</div>
+		</div>
+
+		<div class="mt-8 max-w-2xl">
+			<!-- GitHub PAT Token -->
+			<div class="rounded-xl bg-gray-900 ring-1 ring-white/10 p-6">
+				<div class="flex items-center gap-3">
+					<div class="flex size-10 items-center justify-center rounded-lg bg-indigo-500/10">
+						<svg class="size-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/>
+						</svg>
+					</div>
+					<div class="flex-1">
+						<div class="flex items-center gap-2">
+							<h3 class="text-base font-semibold text-white">GitHub Personal Access Token</h3>
+							<span id="patStatusBadge" class="hidden inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset"></span>
+						</div>
+						<p class="mt-0.5 text-xs text-gray-400">Required to clone private repositories. The token needs <code class="text-gray-300">repo</code> scope.</p>
+					</div>
+				</div>
+
+				<div class="mt-4">
+					<label for="patTokenInput" class="block text-sm font-medium text-gray-300">PAT Token</label>
+					<div class="mt-2 flex gap-2">
+						<input
+							id="patTokenInput"
+							type="password"
+							placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+							class="flex-1 rounded-md bg-gray-950 px-3 py-2 text-sm text-gray-200 ring-1 ring-inset ring-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-600"
+						/>
+						<button onclick="togglePatVisibility()" id="patToggleBtn" class="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition-colors" title="Toggle visibility">
+							<svg id="patEyeIcon" class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+						</button>
+					</div>
+					<div id="patCurrentValue" class="mt-2 text-xs text-gray-500"></div>
+					<div id="patError" class="mt-2 hidden rounded-md bg-red-500/10 p-2 text-xs text-red-400 ring-1 ring-inset ring-red-500/20"></div>
+					<div id="patSuccess" class="mt-2 hidden rounded-md bg-green-500/10 p-2 text-xs text-green-400 ring-1 ring-inset ring-green-500/20"></div>
+				</div>
+
+				<div class="mt-4 flex items-center justify-end gap-x-3 border-t border-white/5 pt-4">
+					<button onclick="validatePatToken()" id="patValidateBtn" class="rounded-md bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20 transition-colors">
+						Validate
+					</button>
+					<button onclick="savePatToken()" id="patSaveBtn" class="rounded-md bg-indigo-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">
+						Save Token
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ Configuration() {
+	@Layout("Configuration") {
+		@ConfigurationContent()
+	}
+}
+
 script startProject(id string) {
 	window.startProject(id);
 }
@@ -612,4 +891,12 @@ script backupProject(id string) {
 
 script showConfig(id string) {
 	window.showConfigModal(id);
+}
+
+script updateOdooOnClick(id string) {
+	window.updateOdoo(id);
+}
+
+script updateRepoOnClick(id string) {
+	window.updateRepoCode(id);
 }

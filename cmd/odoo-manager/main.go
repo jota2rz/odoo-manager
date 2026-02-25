@@ -14,6 +14,7 @@ import (
 
 	"github.com/jota2rz/odoo-manager/internal/audit"
 	"github.com/jota2rz/odoo-manager/internal/events"
+	"github.com/jota2rz/odoo-manager/internal/gitops"
 	"github.com/jota2rz/odoo-manager/internal/handlers"
 	"github.com/jota2rz/odoo-manager/internal/store"
 )
@@ -36,6 +37,35 @@ func main() {
 	}
 	defer projectStore.Close()
 
+	// Ensure git CLI is available (download portable MinGit if needed)
+	gitAvailable := true
+	if err := gitops.EnsureGit(); err != nil {
+		log.Printf("WARNING: %v — git repo features (custom addons, Enterprise, Design Themes) will not work", err)
+		gitAvailable = false
+	}
+
+	// Reset any projects stuck in transient statuses from a previous session
+	if n, err := projectStore.ReconcileStaleStatuses(); err != nil {
+		log.Printf("Warning: failed to reconcile stale statuses: %v", err)
+	} else if n > 0 {
+		log.Printf("Reconciled %d project(s) stuck in transient status → error", n)
+	}
+
+	// Validate stored GitHub PAT token at startup
+	if pat := projectStore.GetSetting("github_pat"); pat != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := gitops.ValidateToken(ctx, pat); err != nil {
+			log.Printf("WARNING: Stored GitHub PAT is invalid: %v", err)
+			_ = projectStore.SetSetting("github_pat_valid", "false")
+		} else {
+			log.Printf("GitHub PAT token validated successfully")
+			_ = projectStore.SetSetting("github_pat_valid", "true")
+		}
+		cancel()
+	} else {
+		_ = projectStore.SetSetting("github_pat_valid", "")
+	}
+
 	// Setup static file server
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -54,7 +84,7 @@ func main() {
 	defer auditLogger.Close()
 
 	// Create handler with dependencies
-	handler := handlers.NewHandler(projectStore, staticHandler, eventHub, Version, auditLogger)
+	handler := handlers.NewHandler(projectStore, staticHandler, eventHub, Version, auditLogger, gitAvailable)
 
 	// Start background Docker health check
 	healthCtx, healthCancel := context.WithCancel(context.Background())
